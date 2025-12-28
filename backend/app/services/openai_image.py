@@ -171,6 +171,7 @@ class OpenAIImageService:
         
         enhanced_prompt = f"{prompt}. Fill removed areas naturally to match the surrounding scene."
         
+        
         print(f"OpenAI Image Edit: model={model}, quality={quality}")
         
         # Call v1/images/edits endpoint
@@ -199,6 +200,8 @@ class OpenAIImageService:
         size = config.get("size", "1024x1024")
         
         enhanced_prompt = f"A scene where {prompt}. Maintain the same composition and style as the original image."
+        
+        print(f"OpenAI Image Removal (Gen): model={model}, quality={quality}")
         
         response = self.client.images.generate(
             model=model,
