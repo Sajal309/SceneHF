@@ -27,6 +27,7 @@ class StepStatus(str, Enum):
     NEEDS_REVIEW = "NEEDS_REVIEW"
     FAILED = "FAILED"
     SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"
 
 
 class AssetKind(str, Enum):
@@ -58,6 +59,7 @@ class StepAction(str, Enum):
     RETRY = "RETRY"
     BG_REMOVE = "BG_REMOVE"
     PLATE_AND_RETRY = "PLATE_AND_RETRY"
+    STOP = "STOP"
 
 
 class Step(BaseModel):
@@ -70,6 +72,7 @@ class Step(BaseModel):
     output_asset_id: Optional[str] = None
     prompt: str = ""
     custom_prompt: Optional[str] = None
+    image_config: Optional[Dict[str, Any]] = None
     validation: Optional[ValidationResult] = None
     actions_available: List[StepAction] = Field(default_factory=list)
     logs: List[str] = Field(default_factory=list)
@@ -120,6 +123,7 @@ class PlanRequest(BaseModel):
 
 class RetryRequest(BaseModel):
     custom_prompt: str
+    image_config: Optional[Dict[str, Any]] = None
 
 
 class PlateAndRetryRequest(BaseModel):

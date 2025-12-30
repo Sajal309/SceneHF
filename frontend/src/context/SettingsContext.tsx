@@ -1,30 +1,42 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 // Models
+export interface ParamValue {
+    value: string | number | boolean;
+    enabled: boolean;
+}
+
 export interface SettingsState {
     apiKey: string;
     provider: 'gemini' | 'openai';
     model: string;
-    temperature: number;
+
+    // Dynamic parameters
+    llmParams: Record<string, ParamValue>;
+    imageParams: Record<string, ParamValue>;
 
     // Image generation settings
-    imageProvider: 'vertex' | 'openai';
+    imageProvider: 'vertex' | 'openai' | 'google';
     imageModel: string;
     imageApiKey: string;
-    imageQuality: 'low' | 'medium' | 'high';
 }
 
 const DEFAULT_SETTINGS: SettingsState = {
     apiKey: '',
     provider: 'gemini',
     model: 'gemini-2.0-flash-exp',
-    temperature: 0.7,
+
+    llmParams: {
+        'temperature': { value: 0.7, enabled: false },
+    },
+    imageParams: {
+        'quality': { value: 'low', enabled: false },
+    },
 
     // Image defaults
     imageProvider: 'openai',
     imageModel: 'gpt-image-1.5',
     imageApiKey: '',
-    imageQuality: 'low',
 };
 
 interface SettingsContextType {
@@ -50,16 +62,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
                 else if (imageModel.startsWith('gpt-image-1-mini')) imageModel = 'gpt-image-1-mini';
                 else if (imageModel.startsWith('gpt-image-1') && !imageModel.includes('mini')) imageModel = 'gpt-image-1';
 
-                // Sanitize quality to avoid legacy versions
-                let imageQuality = parsed.imageQuality || DEFAULT_SETTINGS.imageQuality;
-                if (imageQuality === 'standard') imageQuality = 'low';
-                else if (imageQuality === 'hd') imageQuality = 'high';
-
                 setSettings({
                     ...DEFAULT_SETTINGS,
                     ...parsed,
                     imageModel,
-                    imageQuality
+                    // If old settings existed, migrate them to dynamic params if needed
+                    llmParams: parsed.llmParams || {
+                        'temperature': { value: parsed.temperature ?? 0.7, enabled: false }
+                    },
+                    imageParams: parsed.imageParams || {
+                        'quality': { value: parsed.imageQuality ?? 'low', enabled: false }
+                    }
                 });
             } catch (e) {
                 console.error("Failed to parse settings", e);

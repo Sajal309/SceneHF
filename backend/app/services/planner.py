@@ -189,14 +189,29 @@ class Planner:
                         }
                     ]
                 }
-            ],
-            "response_format": {"type": "json_object"}
+            ]
         }
         
-        # O1 and gpt-5-mini models do not support temperature parameter
-        if not (model_name.lower().startswith("o1") or "gpt-5-mini" in model_name.lower()):
-            completion_args["temperature"] = config.get("temperature", 0.7)
+        # Add response_format only if not O1 (which might not support it in some versions, 
+        # but usually it's required for JSON mode)
+        if not model_name.lower().startswith("o1"):
+            completion_args["response_format"] = {"type": "json_object"}
         
+        # O1 and gpt-5-mini models do not support temperature parameter
+        # AND only add if explicitly provided in config
+        if "temperature" in config:
+            if not (model_name.lower().startswith("o1") or "gpt-5-mini" in model_name.lower()):
+                completion_args["temperature"] = float(config["temperature"])
+        
+        # Add any other dynamic parameters from config (except model and temperature which we handled)
+        for key, value in config.items():
+            if key not in ["model", "temperature"] and key not in completion_args:
+                completion_args[key] = value
+
+        print(f"DEBUG: Planning with OpenAI model={model_name}, params={list(completion_args.keys())}")
+        if "temperature" in completion_args:
+            print(f"DEBUG: Temperature value={completion_args['temperature']}")
+            
         print(f"Calling OpenAI with model: {model_name}, args: {completion_args.keys()}")
         response = client.chat.completions.create(**completion_args)
         
@@ -227,12 +242,27 @@ class Planner:
         
         img = Image.open(image_path)
         
+        # Prepare generation config dynamically
+        generation_config = {}
+        if "temperature" in config:
+            generation_config["temperature"] = float(config["temperature"])
+        
+        # Add response_mime_type if supported (Gemini 1.5+ usually)
+        if not ("vision" in model_name and "1.0" in model_name):
+            generation_config["response_mime_type"] = "application/json"
+            
+        # Add any other params from config
+        for key, value in config.items():
+            if key not in ["model", "temperature"] and key not in generation_config:
+                generation_config[key] = value
+
+        print(f"DEBUG: Planning with Gemini model={model_name}, params={list(generation_config.keys())}")
+        if "temperature" in generation_config:
+            print(f"DEBUG: Temperature value={generation_config['temperature']}")
+
         response = model.generate_content(
             [PLANNER_PROMPT, img],
-            generation_config={
-                "temperature": config.get("temperature", 0.7),
-                "response_mime_type": "application/json"
-            }
+            generation_config=generation_config if generation_config else None
         )
         
         plan_json = json.loads(response.text)

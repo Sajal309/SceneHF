@@ -78,7 +78,8 @@ class Storage:
         job_id: str,
         image_path: str,
         kind: AssetKind,
-        asset_id: Optional[str] = None
+        asset_id: Optional[str] = None,
+        job: Optional[Job] = None
     ) -> Asset:
         """Save an asset image and return Asset metadata."""
         if asset_id is None:
@@ -90,22 +91,33 @@ class Storage:
         
         # Copy to assets directory
         ext = Path(image_path).suffix or '.png'
-        dest_path = self._assets_dir(job_id) / f"{asset_id}{ext}"
+        dest_filename = f"{asset_id}{ext}"
+        dest_path = self._assets_dir(job_id) / dest_filename
         shutil.copy2(image_path, dest_path)
+        
+        # Store RELATIVE path in the DB to make it portable
+        # Relative to project root or storage base
+        rel_path = str(Path("data/jobs") / job_id / "assets" / dest_filename)
         
         asset = Asset(
             id=asset_id,
             kind=kind,
-            path=str(dest_path),
+            path=rel_path,
             width=width,
             height=height
         )
         
         # Update job with new asset
-        job = self.load_job(job_id)
+        # CRITICAL: If job object is provided, update it in-place to avoid state mismatch
         if job:
             job.assets[asset_id] = asset
             self.save_job(job)
+        else:
+            # Fallback to loading from disk if not provided
+            job_on_disk = self.load_job(job_id)
+            if job_on_disk:
+                job_on_disk.assets[asset_id] = asset
+                self.save_job(job_on_disk)
         
         return asset
     

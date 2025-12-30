@@ -78,9 +78,16 @@ class VertexImageService:
         return str(output_path)
 
 
-# Global service instance (only if available)
-try:
-    vertex_service = VertexImageService()
-except (ImportError, ValueError) as e:
-    print(f"Vertex service not available: {e}")
-    vertex_service = None
+def get_vertex_image_service() -> Optional[VertexImageService]:
+    """Get Vertex image service instance."""
+    if not VERTEX_AVAILABLE:
+        return None
+    try:
+        return VertexImageService()
+    except (ImportError, ValueError) as e:
+        print(f"Vertex service not available: {e}")
+        return None
+
+
+# Global service instance (for legacy support if needed)
+vertex_service = get_vertex_image_service()

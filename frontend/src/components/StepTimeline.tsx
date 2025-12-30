@@ -1,12 +1,14 @@
-import { Step, StepStatus } from '../lib/api';
+import { Step, StepStatus, api } from '../lib/api';
+import { Cross2Icon } from '@radix-ui/react-icons';
 
 interface StepTimelineProps {
+    jobId: string;
     steps: Step[];
     selectedStep: Step | null;
     onSelectStep: (step: Step) => void;
 }
 
-export function StepTimeline({ steps, selectedStep, onSelectStep }: StepTimelineProps) {
+export function StepTimeline({ jobId, steps, selectedStep, onSelectStep }: StepTimelineProps) {
     const getStatusBadgeClass = (status: StepStatus) => {
         switch (status) {
             case StepStatus.QUEUED:
@@ -19,8 +21,21 @@ export function StepTimeline({ steps, selectedStep, onSelectStep }: StepTimeline
                 return 'badge-needs-review';
             case StepStatus.FAILED:
                 return 'badge-failed';
+            case StepStatus.CANCELLED:
+                return 'bg-slate-700 text-slate-400';
             default:
                 return 'badge-queued';
+        }
+    };
+
+    const handleStop = async (e: React.MouseEvent, stepId: string) => {
+        e.stopPropagation();
+        if (confirm("Are you sure you want to stop this generation?")) {
+            try {
+                await api.stopStep(jobId, stepId);
+            } catch (err) {
+                console.error("Failed to stop step:", err);
+            }
         }
     };
 
@@ -52,6 +67,16 @@ export function StepTimeline({ steps, selectedStep, onSelectStep }: StepTimeline
                                 {step.status}
                             </span>
                         </div>
+
+                        {(step.status === StepStatus.RUNNING || step.status === StepStatus.QUEUED) && (
+                            <button
+                                onClick={(e) => handleStop(e, step.id)}
+                                className="p-1 text-slate-500 hover:text-red-400 transition-colors"
+                                title="Stop Generation"
+                            >
+                                <Cross2Icon className="w-4 h-4" />
+                            </button>
+                        )}
                     </div>
 
                     <div className="text-white text-sm font-medium mb-1">

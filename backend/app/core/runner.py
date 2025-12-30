@@ -12,6 +12,7 @@ from app.core.validators import validator
 from app.services.vertex_image import vertex_service
 from app.services.fal_bgremove import fal_service
 from app.services.openai_image import get_openai_image_service
+from app.services.google_image import get_google_image_service
 
 
 class Runner:
@@ -42,6 +43,11 @@ class Runner:
         if not step:
             raise ValueError(f"Step {step_id} not found")
         
+        # Check for cancellation
+        if step.status == StepStatus.CANCELLED:
+            pubsub.emit_log(job_id, f"Step {step.name} was cancelled by user.", level="warning")
+            return step
+
         # Update status to RUNNING
         step.status = StepStatus.RUNNING
         storage.save_job(job)
@@ -79,8 +85,12 @@ class Runner:
             
             elif step.type in (StepType.EXTRACT, StepType.REMOVE):
                 # Check if image config specifies OpenAI
-                image_config = job.metadata.get("image_config", {}) if job.metadata else {}
+                # Prefer step-level config if available, otherwise fallback to job metadata
+                image_config = step.image_config or (job.metadata.get("image_config", {}) if job.metadata else {})
                 image_provider = image_config.get("provider", "vertex")
+                image_model = image_config.get("model", "default")
+                
+                pubsub.emit_log(job_id, f"Using {image_provider} provider (model: {image_model})")
                 
                 if image_provider == "openai":
                     pubsub.emit_log(job_id, "Calling OpenAI image generation...")
@@ -107,14 +117,72 @@ class Runner:
                             output_path,
                             config=image_config
                         )
+                elif image_provider == "google":
+                    pubsub.emit_log(job_id, "Calling Google image generation (Gemini)...")
+                    api_key = job.metadata.get("image_api_key") if job.metadata else None
+                    google_service = get_google_image_service(api_key=api_key)
+                    
+                    if not google_service:
+                        raise RuntimeError("Google image service not available")
+                    
+                    output_filename = f"output_{uuid.uuid4().hex[:8]}.png"
+                    output_path = str(storage._assets_dir(job_id) / output_filename)
+                    
+                    if step.type == StepType.EXTRACT:
+                        output_path = google_service.extract(
+                            str(input_path),
+                            prompt,
+                            output_path,
+                            config=image_config
+                        )
+                    else:  # REMOVE
+                        output_path = google_service.remove(
+                            str(input_path),
+                            prompt,
+                            output_path,
+                            config=image_config
+                        )
                 else:
                     # Use Vertex AI (default)
-                    pubsub.emit_log(job_id, "Calling Vertex AI image edit...")
-                    output_path = vertex_service.edit_image(
-                        str(input_path),
-                        prompt,
-                        output_dir=str(storage._assets_dir(job_id))
-                    )
+                    # SMART FALLBACK: If model contains 'gemini', route to google service automatically
+                    if "gemini" in image_model.lower():
+                        pubsub.emit_log(job_id, f"Model '{image_model}' detected. Routing to Google (Gemini) service...")
+                        api_key = job.metadata.get("image_api_key") if job.metadata else None
+                        google_service = get_google_image_service(api_key=api_key)
+                        
+                        if not google_service:
+                            raise RuntimeError("Google image service not available for Gemini model fallback")
+                        
+                        output_filename = f"output_{uuid.uuid4().hex[:8]}.png"
+                        output_path = str(storage._assets_dir(job_id) / output_filename)
+                        
+                        if step.type == StepType.EXTRACT:
+                            output_path = google_service.extract(
+                                str(input_path),
+                                prompt,
+                                output_path,
+                                config=image_config
+                            )
+                        else:  # REMOVE
+                            output_path = google_service.remove(
+                                str(input_path),
+                                prompt,
+                                output_path,
+                                config=image_config
+                            )
+                    else:
+                        pubsub.emit_log(job_id, "Calling Vertex AI image edit...")
+                        from app.services.vertex_image import get_vertex_image_service
+                        v_service = get_vertex_image_service()
+                        
+                        if not v_service:
+                            raise RuntimeError("Vertex AI image service not available. Check if 'google-cloud-aiplatform' is installed and GCP_PROJECT_ID is set. Alternatively, select the 'google' provider for Gemini models.")
+                            
+                        output_path = v_service.edit_image(
+                            str(input_path),
+                            prompt,
+                            output_dir=str(storage._assets_dir(job_id))
+                        )
             
             else:
                 raise ValueError(f"Unknown step type: {step.type}")
@@ -132,7 +200,8 @@ class Runner:
             asset = storage.save_asset(
                 job_id,
                 output_path,
-                asset_kind
+                asset_kind,
+                job=job
             )
             
             step.output_asset_id = asset.id

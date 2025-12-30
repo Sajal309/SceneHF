@@ -87,23 +87,29 @@ class OpenAIImageService:
             Path to generated image with transparent background
         """
         config = config or {}
-        model = self._sanitize_model(config.get("model", "gpt-image-1.5"))
-        quality = self._sanitize_quality(config.get("quality", "low"))  # low, medium, or high
-        size = config.get("size", "1024x1024")
         
-        # Enhance prompt to request transparent background
-        enhanced_prompt = f"{prompt}. The extracted object should be isolated with a transparent background (alpha channel). No background, just the object itself."
+        # Prepare arguments dynamically
+        image_args = {
+            "prompt": enhanced_prompt,
+            "n": 1
+        }
         
-        print(f"OpenAI Image Extract: model={model}, quality={quality}, format=webp (transparent)")
+        if "model" in config:
+            image_args["model"] = self._sanitize_model(config["model"])
+        if "quality" in config:
+            image_args["quality"] = self._sanitize_quality(config["quality"])
+        if "size" in config:
+            image_args["size"] = config["size"]
+            
+        # Add any other dynamic parameters from config
+        for key, value in config.items():
+            if key not in ["model", "quality", "size", "provider"] and key not in image_args:
+                image_args[key] = value
+
+        print(f"OpenAI Image Extract: args={image_args.keys()}")
         
         # Use v1/images/generations endpoint with WebP format for transparency
-        response = self.client.images.generate(
-            model=model,
-            prompt=enhanced_prompt,
-            size=size,
-            quality=quality,
-            n=1
-        )
+        response = self.client.images.generate(**image_args)
         
         # Download and save as WebP to preserve transparency
         image_url = response.data[0].url
@@ -149,40 +155,29 @@ class OpenAIImageService:
         if not PIL_AVAILABLE:
             raise ImportError("PIL not installed")
         
-        model = self._sanitize_model(config.get("model", "gpt-image-1.5"))
-        quality = self._sanitize_quality(config.get("quality", "low"))
-        size = config.get("size", "1024x1024")
+        # Prepare arguments dynamically
+        edit_args = {
+            "image": img_bytes,
+            "prompt": enhanced_prompt,
+            "n": 1
+        }
         
-        # Prepare image: convert to RGBA PNG
-        img = Image.open(image_path)
-        if img.mode != 'RGBA':
-            img = img.convert('RGBA')
+        if "model" in config:
+            edit_args["model"] = self._sanitize_model(config["model"])
+        if "quality" in config:
+            edit_args["quality"] = self._sanitize_quality(config["quality"])
+        if "size" in config:
+            edit_args["size"] = config["size"]
+            
+        # Add any other dynamic parameters from config
+        for key, value in config.items():
+            if key not in ["model", "quality", "size", "provider"] and key not in edit_args:
+                edit_args[key] = value
         
-        # Resize to target size
-        target_size = tuple(map(int, size.split('x')))
-        if img.size != target_size:
-            img = img.resize(target_size, Image.Resampling.LANCZOS)
-        
-        # Save to bytes buffer as PNG
-        img_bytes = BytesIO()
-        img.save(img_bytes, format='PNG')
-        img_bytes.seek(0)
-        img_bytes.name = 'image.png'  # Required by OpenAI API
-        
-        enhanced_prompt = f"{prompt}. Fill removed areas naturally to match the surrounding scene."
-        
-        
-        print(f"OpenAI Image Edit: model={model}, quality={quality}")
+        print(f"OpenAI Image Edit: args={edit_args.keys()}")
         
         # Call v1/images/edits endpoint
-        response = self.client.images.edit(
-            model=model,
-            image=img_bytes,
-            prompt=enhanced_prompt,
-            n=1,
-            size=size,
-            quality=quality
-        )
+        response = self.client.images.edit(**edit_args)
         
         image_url = response.data[0].url
         return self._download_and_convert_webp(image_url, output_path)
@@ -195,21 +190,29 @@ class OpenAIImageService:
         config: Dict[str, Any]
     ) -> str:
         """Fallback: use generation to create scene without objects."""
-        model = self._sanitize_model(config.get("model", "gpt-image-1.5"))
-        quality = self._sanitize_quality(config.get("quality", "low"))
-        size = config.get("size", "1024x1024")
-        
         enhanced_prompt = f"A scene where {prompt}. Maintain the same composition and style as the original image."
         
-        print(f"OpenAI Image Removal (Gen): model={model}, quality={quality}")
+        # Prepare arguments dynamically
+        gen_args = {
+            "prompt": enhanced_prompt,
+            "n": 1
+        }
         
-        response = self.client.images.generate(
-            model=model,
-            prompt=enhanced_prompt,
-            size=size,
-            quality=quality,
-            n=1
-        )
+        if "model" in config:
+            gen_args["model"] = self._sanitize_model(config["model"])
+        if "quality" in config:
+            gen_args["quality"] = self._sanitize_quality(config["quality"])
+        if "size" in config:
+            gen_args["size"] = config["size"]
+            
+        # Add any other dynamic parameters from config
+        for key, value in config.items():
+            if key not in ["model", "quality", "size", "provider"] and key not in gen_args:
+                gen_args[key] = value
+
+        print(f"OpenAI Image Removal (Gen): args={gen_args.keys()}")
+        
+        response = self.client.images.generate(**gen_args)
         
         image_url = response.data[0].url
         return self._download_and_convert_webp(image_url, output_path)

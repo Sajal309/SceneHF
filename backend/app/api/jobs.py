@@ -236,6 +236,8 @@ async def retry_step(
     
     # Update step with custom prompt and reset status
     step.custom_prompt = request.custom_prompt
+    if request.image_config:
+        step.image_config = request.image_config
     step.status = StepStatus.QUEUED
     storage.save_job(job)
     
@@ -332,7 +334,12 @@ async def plate_and_retry(
             
             # Step 1: Create plate (remove occluders)
             pubsub.emit_log(job_id, "Step 1: Removing occluders to create plate...")
-            plate_path = vertex_service.edit_image(
+            from app.services.vertex_image import get_vertex_image_service
+            v_service = get_vertex_image_service()
+            if not v_service:
+                raise RuntimeError("Vertex AI image service not available")
+
+            plate_path = v_service.edit_image(
                 str(input_path),
                 request.remove_prompt,
                 output_dir=str(storage._assets_dir(job_id))
@@ -343,7 +350,11 @@ async def plate_and_retry(
             
             # Step 2: Retry extraction using plate as input
             pubsub.emit_log(job_id, "Step 2: Retrying extraction with plate...")
-            output_path = vertex_service.edit_image(
+            v_service = get_vertex_image_service()
+            if not v_service:
+                 raise RuntimeError("Vertex AI image service not available")
+
+            output_path = v_service.edit_image(
                 plate_path,
                 request.retry_prompt,
                 output_dir=str(storage._assets_dir(job_id))
@@ -384,6 +395,28 @@ async def accept_step(job_id: str, step_id: str):
     pubsub.emit_log(job_id, f"Step accepted: {step.name}")
     
     return {"message": "Step accepted"}
+    
+@router.post("/jobs/{job_id}/steps/{step_id}/stop")
+async def stop_step(job_id: str, step_id: str):
+    """
+    Cancel a running or queued step.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    step = next((s for s in job.steps if s.id == step_id), None)
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    
+    # Update status to CANCELLED
+    step.status = StepStatus.CANCELLED
+    storage.save_job(job)
+    
+    pubsub.emit_log(job_id, f"Step cancelled by user: {step.name}", level="warning")
+    pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
+    
+    return {"message": "Step cancelled"}
 
 
 @router.get("/jobs/{job_id}/assets/{asset_id}")
@@ -391,10 +424,17 @@ async def get_asset(job_id: str, asset_id: str):
     """
     Get an asset image file.
     """
+    print(f"DEBUG: get_asset request: job_id={job_id}, asset_id={asset_id}")
     asset_path = storage.get_asset_path(job_id, asset_id)
     if not asset_path:
+        print(f"DEBUG: get_asset FAILED: asset not found in storage for id {asset_id}")
         raise HTTPException(status_code=404, detail="Asset not found")
     
+    print(f"DEBUG: get_asset SUCCESS: serving file at {asset_path}")
+    if not Path(asset_path).exists():
+        print(f"DEBUG: get_asset ERROR: File exists in DB but MISSING on disk: {asset_path}")
+        raise HTTPException(status_code=404, detail="File missing on disk")
+        
     return FileResponse(asset_path)
 
 

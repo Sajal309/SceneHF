@@ -14,7 +14,8 @@ export enum StepStatus {
     SUCCESS = 'SUCCESS',
     NEEDS_REVIEW = 'NEEDS_REVIEW',
     FAILED = 'FAILED',
-    SKIPPED = 'SKIPPED'
+    SKIPPED = 'SKIPPED',
+    CANCELLED = 'CANCELLED'
 }
 
 export enum StepType {
@@ -58,6 +59,7 @@ export interface Step {
     output_asset_id?: string;
     prompt: string;
     custom_prompt?: string;
+    image_config?: Record<string, any>;
     validation?: ValidationResult;
     actions_available: string[];
     logs: string[];
@@ -164,11 +166,14 @@ export const api = {
         return res.json();
     },
 
-    async retryStep(jobId: string, stepId: string, customPrompt: string): Promise<{ message: string }> {
+    async retryStep(jobId: string, stepId: string, customPrompt: string, imageConfig?: Record<string, any>): Promise<any> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/retry`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ custom_prompt: customPrompt })
+            body: JSON.stringify({
+                custom_prompt: customPrompt,
+                image_config: imageConfig
+            })
         });
 
         if (!res.ok) throw new Error('Failed to retry step');
@@ -209,8 +214,16 @@ export const api = {
         return res.json();
     },
 
-    getAssetUrl(jobId: string, assetId: string): string {
-        return `${API_BASE}/jobs/${jobId}/assets/${assetId}`;
+    getAssetUrl(jobId: string, asset_id: string): string {
+        return `${API_BASE}/jobs/${jobId}/assets/${asset_id}?t=${Date.now()}`;
+    },
+
+    async stopStep(jobId: string, stepId: string): Promise<{ message: string }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/stop`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to stop step');
+        return res.json();
     },
 
     async deleteJob(jobId: string): Promise<{ message: string }> {

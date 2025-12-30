@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useSettings, getApiHeaders } from '../../context/SettingsContext';
 import { api, Job, JobStatus } from '../../lib/api';
 import { UploadCard } from '../UploadCard';
@@ -24,13 +24,17 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
 
     // SSE for live updates
     const handleJobUpdate = useCallback((updatedJob: Job) => {
-        setJob((prev) => {
-            return updatedJob;
-        });
+        setJob(updatedJob);
     }, []);
 
-    const handleStepUpdate = useCallback((step: any) => {
-        // Handled by job update usually
+    const handleStepUpdate = useCallback((updatedStep: any) => {
+        setJob(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                steps: prev.steps.map(s => s.id === updatedStep.id ? updatedStep : s)
+            };
+        });
     }, []);
 
     const handleLog = useCallback((log: any) => {
@@ -44,12 +48,12 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
     });
 
     // Reset logs when jobId changes
-    React.useEffect(() => {
+    useEffect(() => {
         setLogs([]);
     }, [jobId]);
 
     // Load job initially
-    React.useEffect(() => {
+    useEffect(() => {
         if (jobId) {
             api.getJob(jobId).then(setJob).catch(console.error);
         } else {
@@ -75,15 +79,25 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
         setLoading(true);
         try {
             const headers = getApiHeaders(settings);
-            const imageConfig = {
-                provider: settings.imageProvider,
-                model: settings.imageModel,
-                quality: settings.imageQuality
+
+            // Collect enabled LLM params
+            const modelConfig: Record<string, any> = {
+                model: settings.model
             };
-            await api.planJob(jobId, settings.provider, {
-                model: settings.model,
-                temperature: settings.temperature
-            }, imageConfig, headers);
+            Object.entries(settings.llmParams).forEach(([key, param]) => {
+                if (param.enabled) modelConfig[key] = param.value;
+            });
+
+            // Collect enabled Image params
+            const imageConfig: Record<string, any> = {
+                provider: settings.imageProvider,
+                model: settings.imageModel
+            };
+            Object.entries(settings.imageParams).forEach(([key, param]) => {
+                if (param.enabled) imageConfig[key] = param.value;
+            });
+
+            await api.planJob(jobId, settings.provider, modelConfig, imageConfig, headers);
         } catch (e) {
             console.error(e);
             alert("Planning failed");
@@ -145,13 +159,13 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
                 </div>
 
                 <div className="flex items-center gap-2">
-                    {job.status === JobStatus.IDLE && (
+                    {job.status !== JobStatus.RUNNING && (
                         <button
                             onClick={handlePlan}
                             disabled={loading}
-                            className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
+                            className={`flex items-center gap-2 px-4 py-1.5 ${job.status === JobStatus.IDLE ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-gray-700 hover:bg-gray-600'} text-white rounded text-sm font-medium transition-colors disabled:opacity-50`}
                         >
-                            <RocketIcon /> {loading ? 'Planning...' : 'Generate Plan'}
+                            <RocketIcon /> {loading ? 'Planning...' : job.status === JobStatus.IDLE ? 'Generate Plan' : 'Update Config'}
                         </button>
                     )}
 
@@ -180,6 +194,7 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
                 <div className="w-80 border-r border-gray-800 flex flex-col bg-gray-900/30">
                     <div className="flex-1 overflow-y-auto p-4">
                         <StepTimeline
+                            jobId={jobId}
                             steps={job.steps}
                             selectedStep={currentStep}
                             onSelectStep={(step) => setSelectedStepId(step.id)}
