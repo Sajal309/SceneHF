@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { SettingsPanel } from '../components/sidebar/SettingsPanel';
-import { HistoryPanel } from '../components/history/HistoryPanel';
+import { HistoryPanel } from '../components/sidebar/HistoryPanel';
 import { SettingsProvider } from '../context/SettingsContext';
 
 interface MainLayoutProps {
@@ -9,6 +9,13 @@ interface MainLayoutProps {
 }
 
 export function MainLayout({ children, onLoadJob }: MainLayoutProps) {
+    const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+
+    const handleLoadJob = (jobId: string) => {
+        setCurrentJobId(jobId);
+        onLoadJob(jobId);
+    };
+
     return (
         <SettingsProvider>
             <div className="flex h-screen w-screen bg-black text-white overflow-hidden font-sans selection:bg-indigo-500/30">
@@ -21,7 +28,7 @@ export function MainLayout({ children, onLoadJob }: MainLayoutProps) {
                 </main>
 
                 {/* Right Sidebar - History */}
-                <HistoryPanel onLoadJob={onLoadJob} />
+                <HistoryPanel currentJobId={currentJobId} onLoadJob={handleLoadJob} />
             </div>
         </SettingsProvider>
     );

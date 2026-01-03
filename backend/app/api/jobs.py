@@ -79,17 +79,21 @@ async def list_jobs():
             try:
                 job = storage.load_job(jid)
                 if job:
-                    jobs.append(job)
+                    # Include essential metadata for history panel
+                    job_data = job.model_dump(mode='json')
+                    jobs.append(job_data)
             except Exception as e:
                 print(f"Skipping invalid job {jid}: {e}")
                 continue
         
         # Sort by timestamp (newest first)
-        return sorted(
-            [j.model_dump(mode='json') for j in jobs], 
+        sorted_jobs = sorted(
+            jobs, 
             key=lambda x: x.get('created_at', ''), 
             reverse=True
         )
+        
+        return sorted_jobs
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -142,7 +146,10 @@ async def plan_job(
             str(source_path), 
             request.provider,
             request.llm_config,
-            api_key
+            api_key,
+            scene_description=request.scene_description,
+            layer_count=request.layer_count,
+            layer_map=request.layer_map
         )
         job.plan = plan
         
@@ -178,8 +185,16 @@ async def plan_job(
     except Exception as e:
         import traceback
         traceback.print_exc()
-        pubsub.emit_log(job_id, f"Planning failed: {str(e)}", level="error")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        pubsub.emit_log(job_id, f"Planning failed: {error_msg}", level="error")
+        
+        if "429" in error_msg and "quota" in error_msg.lower():
+            raise HTTPException(
+                status_code=429, 
+                detail="Gemini API Quota Exceeded. Please try again later or switch to OpenAI."
+            )
+        
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @router.post("/jobs/{job_id}/run")
@@ -335,36 +350,64 @@ async def plate_and_retry(
             # Step 1: Create plate (remove occluders)
             pubsub.emit_log(job_id, "Step 1: Removing occluders to create plate...")
             from app.services.vertex_image import get_vertex_image_service
-            v_service = get_vertex_image_service()
-            if not v_service:
-                raise RuntimeError("Vertex AI image service not available")
+            from app.services.google_image import get_google_image_service
+            
+            # Try Vertex first, then Google
+            service = get_vertex_image_service()
+            used_service = "vertex"
+            
+            if not service:
+                pubsub.emit_log(job_id, "Vertex AI not available, trying Google Image Service...")
+                # Get API key if available
+                api_key = job.metadata.get("image_api_key") if job.metadata else None
+                service = get_google_image_service(api_key)
+                used_service = "google"
+                
+            if not service:
+                raise RuntimeError("No image editing service available (Vertex OR Google).")
 
-            plate_path = v_service.edit_image(
-                str(input_path),
-                request.remove_prompt,
-                output_dir=str(storage._assets_dir(job_id))
-            )
+            if used_service == "vertex":
+                plate_path = service.edit_image(
+                    str(input_path),
+                    request.remove_prompt,
+                    output_dir=str(storage._assets_dir(job_id))
+                )
+            else:
+                # Google service usage
+                output_filename = f"{uuid.uuid4()}.png"
+                plate_target = str(storage._assets_dir(job_id) / output_filename)
+                plate_path = service.remove(
+                    str(input_path),
+                    request.remove_prompt,
+                    plate_target
+                )
             
             plate_asset = storage.save_asset(job_id, plate_path, AssetKind.PLATE)
             pubsub.emit_log(job_id, f"Plate created: {plate_asset.id}")
             
             # Step 2: Retry extraction using plate as input
             pubsub.emit_log(job_id, "Step 2: Retrying extraction with plate...")
-            v_service = get_vertex_image_service()
-            if not v_service:
-                 raise RuntimeError("Vertex AI image service not available")
-
-            output_path = v_service.edit_image(
-                plate_path,
-                request.retry_prompt,
-                output_dir=str(storage._assets_dir(job_id))
-            )
+            
+            if used_service == "vertex":
+                output_path = service.edit_image(
+                    plate_path,
+                    request.retry_prompt,
+                    output_dir=str(storage._assets_dir(job_id))
+                )
+            else:
+                output_filename = f"{uuid.uuid4()}.png"
+                extract_target = str(storage._assets_dir(job_id) / output_filename)
+                output_path = service.extract(
+                    plate_path,
+                    request.retry_prompt,
+                    extract_target
+                )
             
             output_asset = storage.save_asset(job_id, output_path, AssetKind.LAYER)
             
             # Update step
             step.output_asset_id = output_asset.id
-            step.custom_prompt = f"[Plate+Retry] {request.retry_prompt}"
+            step.custom_prompt = f"[Plate+Retry] {request.retry_prompt} ({used_service})"
             storage.save_job(job)
             
             pubsub.emit_log(job_id, "Plate and retry completed")

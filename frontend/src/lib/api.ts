@@ -144,7 +144,16 @@ export const api = {
             })
         });
 
-        if (!res.ok) throw new Error('Failed to plan job');
+        if (!res.ok) {
+            let errorMsg = 'Failed to plan job';
+            try {
+                const errorData = await res.json();
+                if (errorData.detail) errorMsg = errorData.detail;
+            } catch (e) {
+                // ignore
+            }
+            throw new Error(errorMsg);
+        }
         return res.json();
     },
 

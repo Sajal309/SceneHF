@@ -96,6 +96,12 @@ class GoogleImageService:
             raise ImportError("PIL not installed")
             
         model_name = config.get("model", self.default_model)
+        
+        # FIX: Force remap problematic models from saved configs
+        if "preview" in model_name.lower() or model_name == "gemini-2.5-flash":
+            print(f"Remapping model {model_name} to {self.default_model} due to quota/capability issues")
+            model_name = self.default_model
+            
         model = genai.GenerativeModel(model_name)
         img = Image.open(image_path)
         
@@ -118,23 +124,38 @@ class GoogleImageService:
         # This part depends on the specific API response of gemini-2.5-flash-image
         # If it returns an image directly in the response:
         try:
-            # Placeholder for handling Gemini image output
-            # If the response has a method to get the image parts
-            image_parts = [part.inline_data for part in response.candidates[0].content.parts if part.inline_data]
+            # Debugging response structure
+            print(f"Gemini Response Code: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
+            
+            if not response.candidates:
+                raise RuntimeError("Gemini returned no candidates")
+                
+            candidate = response.candidates[0]
+            
+            # Check for inline image data
+            image_parts = [part.inline_data for part in candidate.content.parts if part.inline_data]
+            
             if image_parts:
                 img_data = image_parts[0].data
                 with open(output_path, 'wb') as f:
                     f.write(img_data)
                 return output_path
             
-            # If it returns a URL (less likely for inline generation but possible if it's like Vertex)
-            # if hasattr(response, 'url'): ...
+            # Safely get text content if any
+            text_content = ""
+            if candidate.content and candidate.content.parts:
+                text_parts = [part.text for part in candidate.content.parts if part.text]
+                text_content = " ".join(text_parts)
             
-            raise RuntimeError(f"Gemini returned no image data: {response.text[:100]}")
+            error_details = f"Finish Reason: {candidate.finish_reason}"
+            if candidate.safety_ratings:
+                error_details += f", Safety: {candidate.safety_ratings}"
+                
+            raise RuntimeError(f"Gemini returned no image data. {error_details}. Content: {text_content[:200]}")
+            
         except Exception as e:
             print(f"Failed to parse Gemini output: {e}")
-            # If it's just text, it failed to generate an image
-            raise RuntimeError(f"Gemini failed to generate image: {response.text}")
+            raise RuntimeError(f"Gemini failed to generate image: {str(e)}")
 
 
 def get_google_image_service(api_key: Optional[str] = None) -> Optional[GoogleImageService]:

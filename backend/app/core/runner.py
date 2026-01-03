@@ -176,13 +176,37 @@ class Runner:
                         v_service = get_vertex_image_service()
                         
                         if not v_service:
-                            raise RuntimeError("Vertex AI image service not available. Check if 'google-cloud-aiplatform' is installed and GCP_PROJECT_ID is set. Alternatively, select the 'google' provider for Gemini models.")
+                            pubsub.emit_log(job_id, "Vertex AI not available. Falling back to Google Image Service...", level="warning")
+                            api_key = job.metadata.get("image_api_key") if job.metadata else None
+                            google_service = get_google_image_service(api_key)
                             
-                        output_path = v_service.edit_image(
-                            str(input_path),
-                            prompt,
-                            output_dir=str(storage._assets_dir(job_id))
-                        )
+                            if not google_service:
+                                raise RuntimeError("Vertex AI image service not available and Google fallback failed.")
+
+                            output_filename = f"output_{uuid.uuid4().hex[:8]}.png"
+                            output_path = str(storage._assets_dir(job_id) / output_filename)
+                            
+                            if step.type == StepType.EXTRACT:
+                                output_path = google_service.extract(
+                                    str(input_path),
+                                    prompt,
+                                    output_path,
+                                    config=image_config
+                                )
+                            else:  # REMOVE
+                                output_path = google_service.remove(
+                                    str(input_path),
+                                    prompt,
+                                    output_path,
+                                    config=image_config
+                                )
+                        else:
+                            # Use Vertex AI
+                            output_path = v_service.edit_image(
+                                str(input_path),
+                                prompt,
+                                output_dir=str(storage._assets_dir(job_id))
+                            )
             
             else:
                 raise ValueError(f"Unknown step type: {step.type}")

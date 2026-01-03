@@ -28,61 +28,52 @@ PLANNER_PROMPT = """You are an expert at analyzing images for layer extraction a
 
 Analyze this background image and create a detailed step-by-step plan to extract layers and create plates.
 
+{layer_instructions}
+
 CRITICAL RULES (must be in every plan):
 1. No cropping, shifting, or zooming - preserve exact alignment
 2. No new objects, people, animals, text, or logos
 3. All extraction outputs MUST have solid white (#FFFFFF) background
 4. Process layers from foreground to background
+5. Follow the user's layer specifications exactly
 
 For each step, specify:
-- Clear target description
+- Clear target description matching user's layer map
 - Precise extraction/removal prompt
 - Validation thresholds (min_nonwhite, max_nonwhite for extractions; min_nonwhite for plates)
 - Fallback strategies if validation fails
 
-Common layer types:
-- Foreground occluders (bushes, fences, poles, signs)
-- Mid-ground elements (buildings, vehicles, trees)
-- Background elements (sky, distant buildings)
-- Ground/road surfaces
-
 Return ONLY valid JSON matching this schema:
-{
+{{
   "scene_summary": "brief description of the scene",
   "global_rules": ["rule 1", "rule 2", ...],
   "steps": [
-    {
+    {{
       "id": "s1",
-      "name": "Extract foreground occluders",
+      "name": "Extract [layer name]",
       "type": "EXTRACT",
       "target": "what to extract",
       "prompt": "Detailed prompt for extraction with white background requirement",
-      "validate": {"min_nonwhite": 0.01, "max_nonwhite": 0.35},
+      "validate": {{"min_nonwhite": 0.01, "max_nonwhite": 0.35}},
       "fallbacks": [
-        {"action": "TIGHTEN_PROMPT", "prompt": "More specific prompt"}
+        {{"action": "TIGHTEN_PROMPT", "prompt": "More specific prompt"}}
       ]
-    },
-    {
+    }},
+    {{
       "id": "s2",
       "name": "Create background plate",
       "type": "REMOVE",
       "target": "what to remove",
       "prompt": "Detailed prompt for removal/inpainting",
-      "validate": {"min_nonwhite": 0.2},
+      "validate": {{"min_nonwhite": 0.2}},
       "fallbacks": []
-    }
+    }}
   ]
-}
-
-Typical workflow:
-1. Extract foreground occluders (EXTRACT with white bg)
-2. Create plate by removing occluders (REMOVE)
-3. Extract mid-ground elements (EXTRACT with white bg)
-4. Create deeper plate (REMOVE)
-5. Continue as needed
+}}
 
 Be specific in prompts about white backgrounds for extractions.
 """
+
 
 
 class Planner:
@@ -106,7 +97,7 @@ class Planner:
             if not api_key:
                 raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY not set")
             genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            self.model = genai.GenerativeModel('gemini-flash-latest')
         
         else:
             raise ValueError(f"Unknown planner provider: {self.provider}")
@@ -120,8 +111,11 @@ class Planner:
         self, 
         image_path: str, 
         provider: Optional[str] = None,
-        model_config: Optional[Dict[str, Any]] = None,
-        api_key: Optional[str] = None
+        model_config: Optional[dict] = None,
+        api_key: Optional[str] = None,
+        scene_description: Optional[str] = None,
+        layer_count: Optional[int] = None,
+        layer_map: Optional[list] = None
     ) -> Plan:
         """
         Generate a dynamic extraction plan for the image.
@@ -131,6 +125,9 @@ class Planner:
             provider: Override default provider (openai or gemini)
             model_config: Config dict (e.g. {"model": "gemini-1.5-pro", "temperature": 0.7})
             api_key: Optional API key override
+            scene_description: User's description of the scene
+            layer_count: Number of layers to extract
+            layer_map: List of {"index": int, "name": str} layer specifications
         
         Returns:
             Plan object with steps
@@ -138,18 +135,33 @@ class Planner:
         use_provider = provider or self.provider
         config = model_config or {}
         
+        # Build layer instructions
+        layer_instructions = ""
+        if scene_description:
+            layer_instructions += f"SCENE DESCRIPTION: {scene_description}\n\n"
+        
+        if layer_count and layer_map:
+            layer_instructions += f"USER LAYER SPECIFICATIONS:\n"
+            layer_instructions += f"The user wants exactly {layer_count} layers extracted in this order:\n"
+            for layer in sorted(layer_map, key=lambda x: x.get('index', 0)):
+                layer_instructions += f"  {layer['index']}. {layer['name']}\n"
+            layer_instructions += "\nGenerate extraction steps that match these layer names and ordering.\n"
+            layer_instructions += "After each extraction, create a plate by removing that layer.\n"
+        
         if use_provider == "openai":
-            return self._generate_plan_openai(image_path, config, api_key)
+            return self._generate_plan_openai(image_path, config, api_key, layer_instructions)
         elif use_provider == "gemini":
-            return self._generate_plan_gemini(image_path, config, api_key)
+            return self._generate_plan_gemini(image_path, config, api_key, layer_instructions)
         else:
             raise ValueError(f"Unknown provider: {use_provider}")
+
     
     def _generate_plan_openai(
         self, 
         image_path: str, 
-        config: Dict[str, Any],
-        api_key: Optional[str] = None
+        config: dict,
+        api_key: Optional[str] = None,
+        layer_instructions: str = ""
     ) -> Plan:
         """Generate plan using OpenAI."""
         if OpenAI is None:
@@ -173,6 +185,10 @@ class Planner:
         base64_image = self._encode_image(image_path)
         
         model_name = config.get("model", "gpt-4o")
+        
+        # Format prompt with layer instructions
+        formatted_prompt = PLANNER_PROMPT.format(layer_instructions=layer_instructions)
+        
         # Build arguments dynamically
         completion_args = {
             "model": model_name,
@@ -180,7 +196,7 @@ class Planner:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": PLANNER_PROMPT},
+                        {"type": "text", "text": formatted_prompt},
                         {
                             "type": "image_url",
                             "image_url": {
@@ -222,8 +238,9 @@ class Planner:
     def _generate_plan_gemini(
         self, 
         image_path: str, 
-        config: Dict[str, Any],
-        api_key: Optional[str] = None
+        config: dict,
+        api_key: Optional[str] = None,
+        layer_instructions: str = ""
     ) -> Plan:
         """Generate plan using Gemini."""
         if genai is None:
@@ -236,11 +253,14 @@ class Planner:
             genai.configure(api_key=api_key)
         
         # Use configured model or default
-        model_name = config.get("model", "gemini-2.0-flash-exp")
+        model_name = config.get("model", "gemini-flash-latest")
         # Ensure we use an available model even if default was set in init
         model = genai.GenerativeModel(model_name)
         
         img = Image.open(image_path)
+        
+        # Format prompt with layer instructions
+        formatted_prompt = PLANNER_PROMPT.format(layer_instructions=layer_instructions)
         
         # Prepare generation config dynamically
         generation_config = {}
@@ -261,7 +281,7 @@ class Planner:
             print(f"DEBUG: Temperature value={generation_config['temperature']}")
 
         response = model.generate_content(
-            [PLANNER_PROMPT, img],
+            [formatted_prompt, img],
             generation_config=generation_config if generation_config else None
         )
         

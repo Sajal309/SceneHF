@@ -118,6 +118,9 @@ class PlanRequest(BaseModel):
     provider: Optional[str] = "gemini"
     llm_config: Optional[Dict[str, Any]] = Field(default_factory=dict, alias="model_config")  # alias to accept frontend's JSON
     image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    scene_description: Optional[str] = None
+    layer_count: Optional[int] = None
+    layer_map: Optional[List[Dict[str, Any]]] = None
 
 
 
