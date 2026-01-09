@@ -5,7 +5,7 @@ import { UploadCard } from '../UploadCard';
 import { SceneEditor } from './SceneEditor';
 import { StepList } from './StepList';
 import { LogsPanel } from '../LogsPanel';
-import { PlayIcon } from '@radix-ui/react-icons';
+import { PlayIcon, PauseIcon } from '@radix-ui/react-icons';
 import { useJobSSE } from '../../lib/sse';
 
 interface WorkspaceProps {
@@ -170,7 +170,28 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
                     onRunPlan={job.status === 'IDLE' ? handlePlan : handleRun}
                     onRerunStep={handleRerunStep}
                     onClearScene={handleClearScene}
+                    onNewScene={() => onJobCreated(null as any)}
                 />
+
+                <div className="absolute top-4 right-80 pr-4 z-50">
+                    <button
+                        onClick={async () => {
+                            try {
+                                await api.pauseAllJobs();
+                                if (job) {
+                                    handleJobUpdate({ ...job, status: JobStatus.PAUSED });
+                                }
+                            } catch (e) {
+                                console.error("Failed to pause all", e);
+                            }
+                        }}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-500 border border-yellow-500/50 rounded-lg text-xs font-semibold backdrop-blur-sm transition-all shadow-lg"
+                        title="Pause all running requests"
+                    >
+                        <PauseIcon className="w-3.5 h-3.5" />
+                        Pause All Request
+                    </button>
+                </div>
 
                 {/* Right: Step List */}
                 <StepList
@@ -184,7 +205,7 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
 
             {/* Logs Panel (bottom overlay) */}
             {logs.length > 0 && (
-                <div className="absolute bottom-0 left-0 right-0 max-h-48">
+                <div className="absolute bottom-0 left-0 right-0 h-48 flex flex-col z-10 shadow-xl">
                     <LogsPanel logs={logs} />
                 </div>
             )}

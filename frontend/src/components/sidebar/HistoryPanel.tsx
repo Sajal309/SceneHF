@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Job, api } from '../../lib/api';
-import { ChevronLeftIcon, ChevronRightIcon, ReloadIcon } from '@radix-ui/react-icons';
+import { ChevronLeftIcon, ChevronRightIcon, ReloadIcon, TrashIcon } from '@radix-ui/react-icons';
 
 interface HistoryPanelProps {
     currentJobId: string | null;
@@ -24,6 +24,18 @@ export function HistoryPanel({ currentJobId, onLoadJob }: HistoryPanelProps) {
             console.error('Failed to load jobs:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleDelete = async (e: React.MouseEvent, jobId: string) => {
+        e.stopPropagation();
+        if (!window.confirm("Are you sure you want to delete this job?")) return;
+
+        try {
+            await api.deleteJob(jobId);
+            loadJobs();
+        } catch (error) {
+            console.error('Failed to delete job:', error);
         }
     };
 
@@ -104,45 +116,55 @@ export function HistoryPanel({ currentJobId, onLoadJob }: HistoryPanelProps) {
                                 <div
                                     key={job.id}
                                     className={`rounded-lg border overflow-hidden transition-all hover:shadow-lg cursor-pointer ${currentJobId === job.id
-                                            ? 'border-indigo-500 bg-indigo-500/10'
-                                            : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                                        ? 'border-indigo-500 bg-indigo-500/10'
+                                        : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
                                         }`}
                                     onClick={() => onLoadJob(job.id)}
                                 >
-                                    {/* Thumbnail */}
-                                    <div className="aspect-video w-full bg-gray-800 overflow-hidden">
-                                        {imageUrl ? (
-                                            <img src={imageUrl} alt="Source" className="w-full h-full object-cover" />
-                                        ) : (
-                                            <div className="w-full h-full flex items-center justify-center text-gray-600">
-                                                No Image
-                                            </div>
-                                        )}
-                                    </div>
+                                    <div className="relative group/card">
+                                        <button
+                                            onClick={(e) => handleDelete(e, job.id)}
+                                            className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-500/80 text-white rounded opacity-0 group-hover/card:opacity-100 transition-all z-10"
+                                            title="Delete Job"
+                                        >
+                                            <TrashIcon />
+                                        </button>
 
-                                    {/* Details */}
-                                    <div className="p-3 space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-xs font-mono text-gray-500">
-                                                {job.id.slice(0, 8)}
-                                            </span>
-                                            <span className={`text-xs px-2 py-0.5 rounded-full ${job.status === 'DONE' ? 'bg-green-500/20 text-green-400' :
+                                        {/* Thumbnail */}
+                                        <div className="aspect-video w-full bg-gray-800 overflow-hidden">
+                                            {imageUrl ? (
+                                                <img src={imageUrl} alt="Source" className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-gray-600">
+                                                    No Image
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Details */}
+                                        <div className="p-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-mono text-gray-500">
+                                                    {job.id.slice(0, 8)}
+                                                </span>
+                                                <span className={`text-xs px-2 py-0.5 rounded-full ${job.status === 'DONE' ? 'bg-green-500/20 text-green-400' :
                                                     job.status === 'RUNNING' ? 'bg-blue-500/20 text-blue-400' :
                                                         job.status === 'FAILED' ? 'bg-red-500/20 text-red-400' :
                                                             'bg-gray-700 text-gray-400'
-                                                }`}>
-                                                {job.status}
-                                            </span>
-                                        </div>
-
-                                        {stepCount > 0 && (
-                                            <div className="text-xs text-gray-400">
-                                                {completedSteps}/{stepCount} steps completed
+                                                    }`}>
+                                                    {job.status}
+                                                </span>
                                             </div>
-                                        )}
 
-                                        <div className="text-[10px] text-gray-600">
-                                            {new Date(job.created_at).toLocaleDateString()}
+                                            {stepCount > 0 && (
+                                                <div className="text-xs text-gray-400">
+                                                    {completedSteps}/{stepCount} steps completed
+                                                </div>
+                                            )}
+
+                                            <div className="text-[10px] text-gray-600">
+                                                {new Date(job.created_at).toLocaleDateString()}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

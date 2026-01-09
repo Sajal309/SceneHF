@@ -90,6 +90,7 @@ export interface Job {
     plan?: Plan;
     steps: Step[];
     assets: Record<string, Asset>;
+    metadata?: Record<string, any>;
     created_at: string;
     updated_at: string;
 }
@@ -240,6 +241,14 @@ export const api = {
             method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete job');
+        return res.json();
+    },
+
+    async pauseAllJobs(): Promise<{ message: string }> {
+        const res = await fetch(`${API_BASE}/jobs/pause-all`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to pause all jobs');
         return res.json();
     },
 

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,10 +9,39 @@ load_dotenv()
 from app.api import jobs, events
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan events: startup and shutdown.
+    """
+    # Startup: Ensure no jobs are stuck in RUNNING state
+    print("Startup: Checking for stuck jobs...")
+    from app.core.storage import storage
+    from app.models.schemas import JobStatus
+    
+    try:
+        # Use absolute path to ensure we hit the right DB even if CWD varies?
+        # Actually storage uses relative path "./data/jobs". 
+        # If uvicorn runs from /backend, it works.
+        job_ids = storage.list_jobs()
+        print(f"Startup: Found {len(job_ids)} jobs.")
+        for jid in job_ids:
+            job = storage.load_job(jid)
+            if job and job.status == JobStatus.RUNNING:
+                print(f"Pausing stuck job: {jid}")
+                job.status = JobStatus.PAUSED
+                storage.save_job(job)
+    except Exception as e:
+        print(f"Startup check failed: {e}")
+        
+    yield
+    # Shutdown logic if any
+
 app = FastAPI(
     title="SceneHF API",
     description="AI-powered image layer extraction and plate creation",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS for local development

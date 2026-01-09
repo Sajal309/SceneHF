@@ -7,9 +7,9 @@ try:
     import vertexai
     from vertexai.preview.vision_models import ImageGenerationModel
     VERTEX_AVAILABLE = True
-except ImportError:
+except Exception as e:
     VERTEX_AVAILABLE = False
-    print("Warning: vertexai not installed. Vertex image editing will not be available.")
+    print(f"Warning: vertexai import failed ({e}). Vertex image editing will not be available.")
 
 from PIL import Image
 

@@ -1,8 +1,7 @@
 import os
 import base64
 import json
-from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 # Support both OpenAI and Google AI
 try:
@@ -14,12 +13,13 @@ except ImportError:
     print("Warning: openai not installed. OpenAI planner will not be available.")
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
     GENAI_AVAILABLE = True
 except ImportError:
     genai = None
     GENAI_AVAILABLE = False
-    print("Warning: google-generativeai not installed. Gemini planner will not be available.")
+    print("Warning: google-genai not installed. Gemini planner will not be available.")
 
 from app.models.schemas import Plan, PlanStep, StepType
 
@@ -36,6 +36,8 @@ CRITICAL RULES (must be in every plan):
 3. All extraction outputs MUST have solid white (#FFFFFF) background
 4. Process layers from foreground to background
 5. Follow the user's layer specifications exactly
+6. Generate clean plates (removing the extracted layer) ONLY when extremely necessary (e.g., when the object is large or leaves a complex hole). Do NOT generate a clean plate for every single layer if it's not needed.
+7. If a clean plate IS generated, it MUST have a solid WHITE background. Do NOT generate transparent or checkered backgrounds.
 
 For each step, specify:
 - Clear target description matching user's layer map
@@ -64,14 +66,14 @@ Return ONLY valid JSON matching this schema:
       "name": "Create background plate",
       "type": "REMOVE",
       "target": "what to remove",
-      "prompt": "Detailed prompt for removal/inpainting",
+      "prompt": "Detailed prompt for removal/inpainting. MUST specify solid white background.",
       "validate": {{"min_nonwhite": 0.2}},
       "fallbacks": []
     }}
   ]
 }}
 
-Be specific in prompts about white backgrounds for extractions.
+Be specific in prompts about white backgrounds for BOTH extractions and clean plates.
 """
 
 
@@ -83,24 +85,27 @@ class Planner:
         self.provider = os.getenv("PLANNER_PROVIDER", "gemini").lower()
         
         if self.provider == "openai":
-            if OpenAI is None:
+            if not OPENAI_AVAILABLE:
                 raise ImportError("openai package not installed")
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
-                raise ValueError("OPENAI_API_KEY not set")
-            self.client = OpenAI(api_key=api_key)
+                # raise ValueError("OPENAI_API_KEY not set")
+                print("Warning: OPENAI_API_KEY not set")
+            else:
+                self.client = OpenAI(api_key=api_key)
         
         elif self.provider == "gemini":
-            if genai is None:
-                raise ImportError("google-generativeai package not installed")
+            if not GENAI_AVAILABLE:
+                raise ImportError("google-genai package not installed")
             api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
             if not api_key:
-                raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY not set")
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-flash-latest')
+                # raise ValueError("GOOGLE_API_KEY not set")
+                print("Warning: GOOGLE_API_KEY not set")
+            else:
+                self.client = genai.Client(api_key=api_key)
         
         else:
-            raise ValueError(f"Unknown planner provider: {self.provider}")
+            print(f"Warning: Unknown planner provider: {self.provider}")
     
     def _encode_image(self, image_path: str) -> str:
         """Encode image to base64."""
@@ -119,18 +124,6 @@ class Planner:
     ) -> Plan:
         """
         Generate a dynamic extraction plan for the image.
-        
-        Args:
-            image_path: Path to source image
-            provider: Override default provider (openai or gemini)
-            model_config: Config dict (e.g. {"model": "gemini-1.5-pro", "temperature": 0.7})
-            api_key: Optional API key override
-            scene_description: User's description of the scene
-            layer_count: Number of layers to extract
-            layer_map: List of {"index": int, "name": str} layer specifications
-        
-        Returns:
-            Plan object with steps
         """
         use_provider = provider or self.provider
         config = model_config or {}
@@ -146,7 +139,7 @@ class Planner:
             for layer in sorted(layer_map, key=lambda x: x.get('index', 0)):
                 layer_instructions += f"  {layer['index']}. {layer['name']}\n"
             layer_instructions += "\nGenerate extraction steps that match these layer names and ordering.\n"
-            layer_instructions += "After each extraction, create a plate by removing that layer.\n"
+            # layer_instructions += "After each extraction, create a plate by removing that layer.\n" # REMOVED: Only generate plate if necessary
         
         if use_provider == "openai":
             return self._generate_plan_openai(image_path, config, api_key, layer_instructions)
@@ -164,7 +157,7 @@ class Planner:
         layer_instructions: str = ""
     ) -> Plan:
         """Generate plan using OpenAI."""
-        if OpenAI is None:
+        if not OPENAI_AVAILABLE:
              raise ImportError("openai package not installed")
 
         # Create temporary client if key provided, else use global if available
@@ -186,7 +179,6 @@ class Planner:
         
         model_name = config.get("model", "gpt-4o")
         
-        # Format prompt with layer instructions
         formatted_prompt = PLANNER_PROMPT.format(layer_instructions=layer_instructions)
         
         # Build arguments dynamically
@@ -208,30 +200,20 @@ class Planner:
             ]
         }
         
-        # Add response_format only if not O1 (which might not support it in some versions, 
-        # but usually it's required for JSON mode)
         if not model_name.lower().startswith("o1"):
             completion_args["response_format"] = {"type": "json_object"}
         
-        # O1 and gpt-5-mini models do not support temperature parameter
-        # AND only add if explicitly provided in config
         if "temperature" in config:
             if not (model_name.lower().startswith("o1") or "gpt-5-mini" in model_name.lower()):
                 completion_args["temperature"] = float(config["temperature"])
         
-        # Add any other dynamic parameters from config (except model and temperature which we handled)
         for key, value in config.items():
             if key not in ["model", "temperature"] and key not in completion_args:
                 completion_args[key] = value
 
-        print(f"DEBUG: Planning with OpenAI model={model_name}, params={list(completion_args.keys())}")
-        if "temperature" in completion_args:
-            print(f"DEBUG: Temperature value={completion_args['temperature']}")
-            
-        print(f"Calling OpenAI with model: {model_name}, args: {completion_args.keys()}")
+        print(f"DEBUG: Planning with OpenAI model={model_name}")
         response = client.chat.completions.create(**completion_args)
         
-        print(f"Raw plan JSON: {response.choices[0].message.content}")
         plan_json = json.loads(response.choices[0].message.content)
         return self._parse_plan(plan_json)
     
@@ -242,55 +224,64 @@ class Planner:
         api_key: Optional[str] = None,
         layer_instructions: str = ""
     ) -> Plan:
-        """Generate plan using Gemini."""
-        if genai is None:
-             raise ImportError("google-generativeai package not installed")
+        """Generate plan using Gemini via google-genai SDK 1.0+."""
+        if not GENAI_AVAILABLE:
+             raise ImportError("google-genai package not installed")
 
         from PIL import Image
         
-        # Configure dynamically if key provided
+        # Determine client
+        client = None
         if api_key:
-            genai.configure(api_key=api_key)
+            client = genai.Client(api_key=api_key)
+        elif hasattr(self, 'client'):
+            client = self.client
         
-        # Use configured model or default
-        model_name = config.get("model", "gemini-flash-latest")
-        # Ensure we use an available model even if default was set in init
-        model = genai.GenerativeModel(model_name)
+        if not client:
+             # Try environment variable fallback because we might have failed init if key wasn't in env then
+             key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+             if key:
+                 client = genai.Client(api_key=key)
+             else:
+                 raise ValueError("Google client not initialized and no API key provided")
         
-        img = Image.open(image_path)
+        # Use gemini-1.5-flash as default if not specified, it supports JSON
+        model_name = config.get("model", "gemini-2.0-flash")
         
-        # Format prompt with layer instructions
-        formatted_prompt = PLANNER_PROMPT.format(layer_instructions=layer_instructions)
+        print(f"DEBUG: Planning with Gemini model={model_name}")
         
-        # Prepare generation config dynamically
-        generation_config = {}
-        if "temperature" in config:
-            generation_config["temperature"] = float(config["temperature"])
-        
-        # Add response_mime_type if supported (Gemini 1.5+ usually)
-        if not ("vision" in model_name and "1.0" in model_name):
-            generation_config["response_mime_type"] = "application/json"
+        try:
+            img = Image.open(image_path)
+            formatted_prompt = PLANNER_PROMPT.format(layer_instructions=layer_instructions)
             
-        # Add any other params from config
-        for key, value in config.items():
-            if key not in ["model", "temperature"] and key not in generation_config:
-                generation_config[key] = value
-
-        print(f"DEBUG: Planning with Gemini model={model_name}, params={list(generation_config.keys())}")
-        if "temperature" in generation_config:
-            print(f"DEBUG: Temperature value={generation_config['temperature']}")
-
-        response = model.generate_content(
-            [formatted_prompt, img],
-            generation_config=generation_config if generation_config else None
-        )
-        
-        plan_json = json.loads(response.text)
-        return self._parse_plan(plan_json)
+            # Prepare config with JSON schema enforcement if possible, or just instruction
+            # Gemini 1.5 Pro/Flash supports response_mime_type="application/json"
+            
+            gen_config = {}
+            if "temperature" in config:
+                gen_config["temperature"] = float(config["temperature"])
+            
+            # Use JSON mode defined in types
+            gen_config["response_mime_type"] = "application/json"
+                
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[formatted_prompt, img],
+                config=gen_config
+            )
+            
+            if not response.text:
+                raise ValueError("Empty response from Gemini")
+                
+            plan_json = json.loads(response.text)
+            return self._parse_plan(plan_json)
+            
+        except Exception as e:
+            print(f"Gemini Planning Error: {e}")
+            raise
     
     def _parse_plan(self, plan_json: dict) -> Plan:
         """Parse and validate plan JSON."""
-        # Convert step types to enum
         steps = []
         for step_data in plan_json.get("steps", []):
             step_type_str = step_data.get("type", "EXTRACT").upper()
@@ -313,9 +304,9 @@ class Planner:
         )
 
 
-# Global planner instance (only if available)
+# Global planner instance
 try:
     planner = Planner()
-except (ImportError, ValueError) as e:
+except Exception as e:
     print(f"Planner service not available: {e}")
     planner = None

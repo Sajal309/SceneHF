@@ -1,4 +1,5 @@
 import uuid
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -48,6 +49,11 @@ class Runner:
             pubsub.emit_log(job_id, f"Step {step.name} was cancelled by user.", level="warning")
             return step
 
+        # Check for Job Pause (Global Pause)
+        if job.status == JobStatus.PAUSED:
+            pubsub.emit_log(job_id, "Cannot run step: Job is paused.", level="warning")
+            return step
+
         # Update status to RUNNING
         step.status = StepStatus.RUNNING
         storage.save_job(job)
@@ -78,7 +84,8 @@ class Runner:
             
             if step.type == StepType.BG_REMOVE:
                 pubsub.emit_log(job_id, "Calling Fal.ai background removal...")
-                output_path = fal_service.remove_bg(
+                output_path = await asyncio.to_thread(
+                    fal_service.remove_bg,
                     str(input_path),
                     output_dir=str(storage._assets_dir(job_id))
                 )
@@ -104,14 +111,16 @@ class Runner:
                     output_path = str(storage._assets_dir(job_id) / output_filename)
                     
                     if step.type == StepType.EXTRACT:
-                        output_path = openai_service.extract(
+                        output_path = await asyncio.to_thread(
+                            openai_service.extract,
                             str(input_path),
                             prompt,
                             output_path,
                             config=image_config
                         )
                     else:  # REMOVE
-                        output_path = openai_service.remove(
+                        output_path = await asyncio.to_thread(
+                            openai_service.remove,
                             str(input_path),
                             prompt,
                             output_path,
@@ -129,14 +138,16 @@ class Runner:
                     output_path = str(storage._assets_dir(job_id) / output_filename)
                     
                     if step.type == StepType.EXTRACT:
-                        output_path = google_service.extract(
+                        output_path = await asyncio.to_thread(
+                            google_service.extract,
                             str(input_path),
                             prompt,
                             output_path,
                             config=image_config
                         )
                     else:  # REMOVE
-                        output_path = google_service.remove(
+                        output_path = await asyncio.to_thread(
+                            google_service.remove,
                             str(input_path),
                             prompt,
                             output_path,
@@ -157,14 +168,16 @@ class Runner:
                         output_path = str(storage._assets_dir(job_id) / output_filename)
                         
                         if step.type == StepType.EXTRACT:
-                            output_path = google_service.extract(
+                            output_path = await asyncio.to_thread(
+                                google_service.extract,
                                 str(input_path),
                                 prompt,
                                 output_path,
                                 config=image_config
                             )
                         else:  # REMOVE
-                            output_path = google_service.remove(
+                            output_path = await asyncio.to_thread(
+                                google_service.remove,
                                 str(input_path),
                                 prompt,
                                 output_path,
@@ -187,14 +200,16 @@ class Runner:
                             output_path = str(storage._assets_dir(job_id) / output_filename)
                             
                             if step.type == StepType.EXTRACT:
-                                output_path = google_service.extract(
+                                output_path = await asyncio.to_thread(
+                                    google_service.extract,
                                     str(input_path),
                                     prompt,
                                     output_path,
                                     config=image_config
                                 )
                             else:  # REMOVE
-                                output_path = google_service.remove(
+                                output_path = await asyncio.to_thread(
+                                    google_service.remove,
                                     str(input_path),
                                     prompt,
                                     output_path,
@@ -202,7 +217,8 @@ class Runner:
                                 )
                         else:
                             # Use Vertex AI
-                            output_path = v_service.edit_image(
+                            output_path = await asyncio.to_thread(
+                                v_service.edit_image,
                                 str(input_path),
                                 prompt,
                                 output_dir=str(storage._assets_dir(job_id))
@@ -227,6 +243,30 @@ class Runner:
                 asset_kind,
                 job=job
             )
+
+            # FORCE WHITE BACKGROUND: For REMOVE (clean plate) steps, ensure output is solid white
+            if step.type == StepType.REMOVE and output_path:
+                try:
+                    pubsub.emit_log(job_id, "Post-processing: Enforcing white background for clean plate...")
+                    from PIL import Image
+                    
+                    with Image.open(output_path) as img:
+                        # Check if image has transparency or needs flattening
+                        if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                            # Create solid white background
+                            white_bg = Image.new("RGB", img.size, (255, 255, 255))
+                            # Composite
+                            white_bg.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
+                            
+                            # Save back to same path (as PNG to be safe, or keep extension)
+                            white_bg.save(output_path)
+                            pubsub.emit_log(job_id, "Clean plate composited on white background.")
+                        else:
+                             # Even if RGB, verify it's not just black where it should be white (less likely if prompt worked, but safe to leave as is)
+                             pass
+                except Exception as e:
+                    print(f"Failed to enforce white background: {e}")
+                    pubsub.emit_log(job_id, f"Warning: White background enforcement failed: {e}", level="warning")
             
             step.output_asset_id = asset.id
             
@@ -321,6 +361,13 @@ class Runner:
                 if step.status != StepStatus.QUEUED:
                     continue
                 
+                # Check for external pause/cancellation BEFORE running step
+                # Reload job to get latest status
+                current_job = storage.load_job(job_id)
+                if current_job and current_job.status != JobStatus.RUNNING:
+                    pubsub.emit_log(job_id, "Job execution paused/stopped externally.", level="warning")
+                    return current_job
+
                 await self.run_step(job_id, step.id)
                 
                 # Reload job to get updated step

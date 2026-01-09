@@ -90,7 +90,7 @@ class OpenAIImageService:
         
         # Prepare arguments dynamically
         image_args = {
-            "prompt": enhanced_prompt,
+            "prompt": prompt,
             "n": 1
         }
         
@@ -158,7 +158,7 @@ class OpenAIImageService:
         # Prepare arguments dynamically
         edit_args = {
             "image": img_bytes,
-            "prompt": enhanced_prompt,
+            "prompt": prompt,
             "n": 1
         }
         
@@ -190,11 +190,11 @@ class OpenAIImageService:
         config: Dict[str, Any]
     ) -> str:
         """Fallback: use generation to create scene without objects."""
-        enhanced_prompt = f"A scene where {prompt}. Maintain the same composition and style as the original image."
+        # Use prompt directly
         
         # Prepare arguments dynamically
         gen_args = {
-            "prompt": enhanced_prompt,
+            "prompt": prompt,
             "n": 1
         }
         

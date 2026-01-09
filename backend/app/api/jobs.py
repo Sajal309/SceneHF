@@ -1,4 +1,5 @@
 import uuid
+import asyncio
 import shutil
 import zipfile
 from pathlib import Path
@@ -293,7 +294,8 @@ async def bg_remove_step(
             if not input_path:
                 raise ValueError("Output asset not found")
             
-            output_path = fal_service.remove_bg(
+            output_path = await asyncio.to_thread(
+                fal_service.remove_bg,
                 str(input_path),
                 output_dir=str(storage._assets_dir(job_id))
             )
@@ -367,7 +369,8 @@ async def plate_and_retry(
                 raise RuntimeError("No image editing service available (Vertex OR Google).")
 
             if used_service == "vertex":
-                plate_path = service.edit_image(
+                plate_path = await asyncio.to_thread(
+                    service.edit_image,
                     str(input_path),
                     request.remove_prompt,
                     output_dir=str(storage._assets_dir(job_id))
@@ -376,7 +379,8 @@ async def plate_and_retry(
                 # Google service usage
                 output_filename = f"{uuid.uuid4()}.png"
                 plate_target = str(storage._assets_dir(job_id) / output_filename)
-                plate_path = service.remove(
+                plate_path = await asyncio.to_thread(
+                    service.remove,
                     str(input_path),
                     request.remove_prompt,
                     plate_target
@@ -389,7 +393,8 @@ async def plate_and_retry(
             pubsub.emit_log(job_id, "Step 2: Retrying extraction with plate...")
             
             if used_service == "vertex":
-                output_path = service.edit_image(
+                output_path = await asyncio.to_thread(
+                    service.edit_image,
                     plate_path,
                     request.retry_prompt,
                     output_dir=str(storage._assets_dir(job_id))
@@ -397,7 +402,8 @@ async def plate_and_retry(
             else:
                 output_filename = f"{uuid.uuid4()}.png"
                 extract_target = str(storage._assets_dir(job_id) / output_filename)
-                output_path = service.extract(
+                output_path = await asyncio.to_thread(
+                    service.extract,
                     plate_path,
                     request.retry_prompt,
                     extract_target
@@ -461,6 +467,27 @@ async def stop_step(job_id: str, step_id: str):
     
     return {"message": "Step cancelled"}
 
+
+@router.post("/jobs/pause-all")
+async def pause_all_jobs():
+    """
+    Pause/Stop all currently running jobs.
+    """
+    try:
+        count = 0
+        job_ids = storage.list_jobs()
+        for jid in job_ids:
+            job = storage.load_job(jid)
+            if job and job.status == JobStatus.RUNNING:
+                job.status = JobStatus.PAUSED
+                storage.save_job(job)
+                pubsub.emit_log(jid, "Job paused by 'Pause All' request.", level="warning")
+                pubsub.emit_job_updated(jid, job.model_dump(mode='json'))
+                count += 1
+        
+        return {"message": f"Paused {count} running jobs"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/jobs/{job_id}/assets/{asset_id}")
 async def get_asset(job_id: str, asset_id: str):

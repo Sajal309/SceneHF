@@ -44,7 +44,7 @@ export function LogsPanel({ logs, className = '' }: LogsPanelProps) {
     };
 
     return (
-        <div className={`flex-1 overflow-y-auto bg-slate-900 rounded-lg p-4 font-mono text-xs ${className}`}>
+        <div className={`flex-1 overflow-y-auto custom-scrollbar bg-slate-900 border-t border-slate-800 p-4 font-mono text-xs ${className}`}>
             {logs.length === 0 ? (
                 <div className="text-slate-500 text-center py-8">
                     No logs yet. Logs will appear here as the job runs.
