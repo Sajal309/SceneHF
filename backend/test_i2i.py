@@ -39,11 +39,11 @@ def test_i2i(client, model):
     return False
 
 if __name__ == "__main__":
-    API_KEY = "PASTE_YOUR_API_KEY_HERE" # User said "PASTE_YOUR_API_KEY_HERE" in their script? 
-    # Ah, the user's script HAD the key, but they pasted a snippet where they commented "PASTE YOUR GOOGLE AI STUDIO API KEY HERE"
-    # Wait, the user's PREVIOUS message had the key: "AIzaSyC6M3Te9iEpbh4-Ow_eXpCz_2fnJuwV0qs"
-    # I should use that one.
-    API_KEY = "AIzaSyC6M3Te9iEpbh4-Ow_eXpCz_2fnJuwV0qs"
+    API_KEY = os.getenv("GOOGLE_API_KEY")
+    if not API_KEY:
+        print("Skipping test: GOOGLE_API_KEY not set")
+        exit(0)
+
     
     client = genai.Client(api_key=API_KEY)
     MODEL = "gemini-2.5-flash-image"

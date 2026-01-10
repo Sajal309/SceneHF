@@ -44,8 +44,10 @@ if __name__ == "__main__":
         # Or just ask user. But I can't ask user easily.
         # I'll rely on env var. If not set, I'll fail.
         # Wait, the user provided the API key in the initial prompt!
-        # "AIzaSyC6M3Te9iEpbh4-Ow_eXpCz_2fnJuwV0qs"
-        API_KEY = "AIzaSyC6M3Te9iEpbh4-Ow_eXpCz_2fnJuwV0qs"
+        API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not API_KEY:
+            print("Error: GOOGLE_API_KEY not set in environment or .env file")
+            return
     
     client = genai.Client(api_key=API_KEY)
     MODEL = "gemini-2.5-flash-image"

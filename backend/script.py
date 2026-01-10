@@ -4,7 +4,8 @@ import base64
 from io import BytesIO
 
 # 🔑 HARD-CODED API KEY
-API_KEY = "AIzaSyC6M3Te9iEpbh4-Ow_eXpCz_2fnJuwV0qs"
+# Configure Gemini
+API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Configure Gemini
 genai.configure(api_key=API_KEY)
