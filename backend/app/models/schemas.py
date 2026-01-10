@@ -115,7 +115,7 @@ class JobCreateResponse(BaseModel):
 
 
 class PlanRequest(BaseModel):
-    provider: Optional[str] = "gemini"
+    provider: Optional[str] = "openai"
     llm_config: Optional[Dict[str, Any]] = Field(default_factory=dict, alias="model_config")  # alias to accept frontend's JSON
     image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
     scene_description: Optional[str] = None

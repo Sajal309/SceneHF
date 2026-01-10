@@ -127,10 +127,13 @@ export const api = {
 
     async planJob(
         jobId: string,
-        provider: string = 'gemini',
+        provider: string = 'openai',
         modelConfig: Record<string, any> = {},
         imageConfig: Record<string, any> = {},
-        headers: Record<string, string> = {}
+        headers: Record<string, string> = {},
+        sceneDescription?: string,
+        layerCount?: number,
+        layerMap?: any[]
     ): Promise<{ message: string; steps: number }> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}/plan`, {
             method: 'POST',
@@ -141,7 +144,10 @@ export const api = {
             body: JSON.stringify({
                 provider,
                 model_config: modelConfig,
-                image_config: imageConfig
+                image_config: imageConfig,
+                scene_description: sceneDescription,
+                layer_count: layerCount,
+                layer_map: layerMap
             })
         });
 
@@ -225,7 +231,11 @@ export const api = {
     },
 
     getAssetUrl(jobId: string, asset_id: string): string {
-        return `${API_BASE}/jobs/${jobId}/assets/${asset_id}?t=${Date.now()}`;
+        // Use 5-minute intervals for cache-busting to prevent broken links
+        // while still ensuring fresh images after regeneration
+        const fiveMinutes = 5 * 60 * 1000;
+        const stableTimestamp = Math.floor(Date.now() / fiveMinutes) * fiveMinutes;
+        return `${API_BASE}/jobs/${jobId}/assets/${asset_id}?t=${stableTimestamp}`;
     },
 
     async stopStep(jobId: string, stepId: string): Promise<{ message: string }> {

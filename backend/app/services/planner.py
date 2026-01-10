@@ -82,7 +82,7 @@ class Planner:
     """Dynamic plan generation using reasoning models."""
     
     def __init__(self):
-        self.provider = os.getenv("PLANNER_PROVIDER", "gemini").lower()
+        self.provider = os.getenv("PLANNER_PROVIDER", "openai").lower()
         
         if self.provider == "openai":
             if not OPENAI_AVAILABLE:
@@ -149,6 +149,19 @@ class Planner:
             raise ValueError(f"Unknown provider: {use_provider}")
 
     
+    def _clean_json_response(self, text: str) -> str:
+        """Strip markdown blocks from potential JSON response."""
+        text = text.strip()
+        if text.startswith("```"):
+            # Remove opening block
+            lines = text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        return text
+
     def _generate_plan_openai(
         self, 
         image_path: str, 
@@ -163,17 +176,23 @@ class Planner:
         # Create temporary client if key provided, else use global if available
         client = None
         if api_key:
+            print("INFO: Creating temporary OpenAI client with provided key")
             client = OpenAI(api_key=api_key)
-        elif hasattr(self, 'client'):
+        elif hasattr(self, 'client') and self.provider == "openai":
+            print("INFO: Using existing OpenAI client")
             client = self.client
             
         if not client:
              # Try environment variable fallback
              key = os.getenv("OPENAI_API_KEY")
              if key:
+                 print("INFO: Creating OpenAI client from environment variable")
                  client = OpenAI(api_key=key)
              else:
-                 raise ValueError("OpenAI client not initialized and no API key provided")
+                 error_msg = ("OpenAI client not initialized. Please ensure OPENAI_API_KEY is provided "
+                              "in the frontend settings or set as an environment variable.")
+                 print(f"ERROR: {error_msg}")
+                 raise ValueError(error_msg)
 
         base64_image = self._encode_image(image_path)
         
@@ -200,22 +219,29 @@ class Planner:
             ]
         }
         
-        if not model_name.lower().startswith("o1"):
+        if not model_name.lower().startswith("o1") and "mini" not in model_name.lower():
             completion_args["response_format"] = {"type": "json_object"}
         
         if "temperature" in config:
-            if not (model_name.lower().startswith("o1") or "gpt-5-mini" in model_name.lower()):
+            if not (model_name.lower().startswith("o1") or "mini" in model_name.lower()):
                 completion_args["temperature"] = float(config["temperature"])
         
         for key, value in config.items():
             if key not in ["model", "temperature"] and key not in completion_args:
                 completion_args[key] = value
 
-        print(f"DEBUG: Planning with OpenAI model={model_name}")
-        response = client.chat.completions.create(**completion_args)
-        
-        plan_json = json.loads(response.choices[0].message.content)
-        return self._parse_plan(plan_json)
+        print(f"DEBUG: Calling OpenAI Chat API with model={model_name}")
+        try:
+            response = client.chat.completions.create(**completion_args)
+            content = response.choices[0].message.content
+            print(f"DEBUG: OpenAI raw response: {content[:100]}...")
+            
+            clean_content = self._clean_json_response(content)
+            plan_json = json.loads(clean_content)
+            return self._parse_plan(plan_json)
+        except Exception as e:
+            print(f"OpenAI Planning Error: {e}")
+            raise
     
     def _generate_plan_gemini(
         self, 
@@ -233,29 +259,32 @@ class Planner:
         # Determine client
         client = None
         if api_key:
+            print("INFO: Creating temporary Gemini client with provided key")
             client = genai.Client(api_key=api_key)
-        elif hasattr(self, 'client'):
+        elif hasattr(self, 'client') and self.provider == "gemini":
+            print("INFO: Using existing Gemini client")
             client = self.client
         
         if not client:
              # Try environment variable fallback because we might have failed init if key wasn't in env then
              key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
              if key:
+                 print("INFO: Creating Gemini client from environment variable")
                  client = genai.Client(api_key=key)
              else:
-                 raise ValueError("Google client not initialized and no API key provided")
+                 error_msg = ("Google client not initialized. Please ensure GOOGLE_API_KEY is provided "
+                              "in the frontend settings or set as an environment variable.")
+                 print(f"ERROR: {error_msg}")
+                 raise ValueError(error_msg)
         
         # Use gemini-1.5-flash as default if not specified, it supports JSON
         model_name = config.get("model", "gemini-2.0-flash")
         
-        print(f"DEBUG: Planning with Gemini model={model_name}")
+        print(f"DEBUG: Calling Gemini API with model={model_name}")
         
         try:
             img = Image.open(image_path)
             formatted_prompt = PLANNER_PROMPT.format(layer_instructions=layer_instructions)
-            
-            # Prepare config with JSON schema enforcement if possible, or just instruction
-            # Gemini 1.5 Pro/Flash supports response_mime_type="application/json"
             
             gen_config = {}
             if "temperature" in config:
@@ -272,8 +301,11 @@ class Planner:
             
             if not response.text:
                 raise ValueError("Empty response from Gemini")
-                
-            plan_json = json.loads(response.text)
+            
+            print(f"DEBUG: Gemini raw response: {response.text[:100]}...")
+            
+            clean_content = self._clean_json_response(response.text)
+            plan_json = json.loads(clean_content)
             return self._parse_plan(plan_json)
             
         except Exception as e:

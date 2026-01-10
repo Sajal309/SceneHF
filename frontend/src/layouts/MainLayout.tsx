@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SettingsPanel } from '../components/sidebar/SettingsPanel';
 import { HistoryPanel } from '../components/sidebar/HistoryPanel';
 import { SettingsProvider } from '../context/SettingsContext';
@@ -10,6 +10,14 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, onLoadJob }: MainLayoutProps) {
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+
+    // Restore last job on mount
+    useEffect(() => {
+        const lastJobId = localStorage.getItem('scenehf_last_job');
+        if (lastJobId) {
+            handleLoadJob(lastJobId);
+        }
+    }, []);
 
     const handleLoadJob = (jobId: string) => {
         setCurrentJobId(jobId);

@@ -58,7 +58,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
             </div>
 
             {/* Step List */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 pb-6 space-y-2">
                 {job.steps.length === 0 ? (
                     <div className="text-center py-12 text-gray-600 text-sm">
                         No steps yet. Generate a plan first.
@@ -77,8 +77,8 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                 key={step.id}
                                 onClick={() => onSelectStep(step)}
                                 className={`rounded-lg border overflow-hidden cursor-pointer transition-all ${isSelected
-                                        ? 'border-indigo-500 bg-indigo-500/10 shadow-lg'
-                                        : 'border-gray-800 bg-gray-900/50 hover:border-gray-700 hover:bg-gray-800/50'
+                                    ? 'border-indigo-500 bg-indigo-500/10 shadow-lg'
+                                    : 'border-gray-800 bg-gray-900/50 hover:border-gray-700 hover:bg-gray-800/50'
                                     }`}
                             >
                                 {/* Thumbnail */}

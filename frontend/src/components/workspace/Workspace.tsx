@@ -20,17 +20,35 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
     const [loading, setLoading] = useState(false);
     const [logs, setLogs] = useState<any[]>([]);
 
+    // Persist job ID to localStorage
+    useEffect(() => {
+        if (jobId) {
+            localStorage.setItem('scenehf_last_job', jobId);
+        }
+    }, [jobId]);
+
     // SSE for live updates
     const handleJobUpdate = useCallback((updatedJob: Job) => {
-        setJob(updatedJob);
+        setJob(prev => {
+            // Merge assets to prevent loss during concurrent updates
+            if (prev && prev.assets && updatedJob.assets) {
+                return {
+                    ...updatedJob,
+                    assets: { ...prev.assets, ...updatedJob.assets }
+                };
+            }
+            return updatedJob;
+        });
     }, []);
 
     const handleStepUpdate = useCallback((updatedStep: any) => {
         setJob(prev => {
             if (!prev) return null;
+            // Preserve all assets when updating steps
             return {
                 ...prev,
-                steps: prev.steps.map(s => s.id === updatedStep.id ? updatedStep : s)
+                steps: prev.steps.map(s => s.id === updatedStep.id ? updatedStep : s),
+                assets: prev.assets // Explicitly preserve assets
             };
         });
     }, []);
@@ -77,7 +95,9 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
             const headers = getApiHeaders(settings);
 
             // Build LLM config
-            const llmConfig: Record<string, any> = {};
+            const llmConfig: Record<string, any> = {
+                model: settings.model
+            };
             Object.entries(settings.llmParams).forEach(([key, param]) => {
                 if (param.enabled) {
                     llmConfig[key] = param.value;

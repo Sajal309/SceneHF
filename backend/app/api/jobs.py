@@ -128,6 +128,7 @@ async def plan_job(
         raise HTTPException(status_code=400, detail="No source image")
     
     pubsub.emit_log(job_id, "Generating plan...")
+    print(f"DEBUG: plan_job request: {request.dict()}")
     
     # Get source image path
     source_path = storage.get_asset_path(job_id, job.source_image)
@@ -136,6 +137,9 @@ async def plan_job(
     
     # Determine API key based on provider
     api_key = None
+    print(f"DEBUG: plan_job: request.provider='{request.provider}'")
+    print(f"DEBUG: Headers received - X-Google-Api-Key: {'set' if x_google_api_key else 'None'}, X-Openai-Api-Key: {'set' if x_openai_api_key else 'None'}")
+    
     if request.provider == "gemini":
         api_key = x_google_api_key
     elif request.provider == "openai":

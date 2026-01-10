@@ -1,5 +1,7 @@
 import { useState, useRef } from 'react';
 import { PlusIcon, TrashIcon, LayersIcon } from '@radix-ui/react-icons';
+import { useSettings, getApiHeaders } from '../context/SettingsContext';
+import { api } from '../lib/api';
 
 interface LayerSpec {
     index: number;
@@ -11,6 +13,7 @@ interface UploadCardProps {
 }
 
 export function UploadCard({ onJobCreated }: UploadCardProps) {
+    const { settings } = useSettings();
     const [dragActive, setDragActive] = useState(false);
     const [preview, setPreview] = useState<string | null>(null);
     const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -103,38 +106,43 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
         setError(null);
 
         try {
-            // Upload image
-            const formData = new FormData();
-            formData.append('file', uploadedFile);
+            // Upload image using standard helper
+            const { job_id } = await api.createJob(uploadedFile);
 
-            const uploadRes = await fetch('/api/jobs', {
-                method: 'POST',
-                body: formData
+            // Get headers and config from settings
+            const headers = getApiHeaders(settings);
+
+            const llmConfig: Record<string, any> = {
+                model: settings.model
+            };
+            Object.entries(settings.llmParams).forEach(([key, param]) => {
+                if (param.enabled) llmConfig[key] = param.value;
             });
 
-            if (!uploadRes.ok) throw new Error('Upload failed');
-
-            const { job_id } = await uploadRes.json();
-
-            // Trigger planning with layer data
-            const planRes = await fetch(`/api/jobs/${job_id}/plan`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    provider: 'gemini',
-                    model_config: {},
-                    image_config: {},
-                    scene_description: sceneDescription,
-                    layer_count: layerCount,
-                    layer_map: layers
-                })
+            const imageConfig: Record<string, any> = {
+                provider: settings.imageProvider,
+                model: settings.imageModel
+            };
+            Object.entries(settings.imageParams).forEach(([key, param]) => {
+                if (param.enabled) imageConfig[key] = param.value;
             });
 
-            if (!planRes.ok) throw new Error('Planning failed');
+            // Trigger planning through standard helper
+            await api.planJob(
+                job_id,
+                settings.provider,
+                llmConfig,
+                imageConfig,
+                headers,
+                sceneDescription,
+                layerCount,
+                layers
+            );
 
             onJobCreated(job_id);
         } catch (err: any) {
-            setError(err.message || 'Failed to create job');
+            console.error('Handled generation error:', err);
+            setError(err.message || 'Failed to generate plan');
         } finally {
             setUploading(false);
         }
@@ -145,10 +153,10 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
             {/* Upload Area */}
             <div
                 className={`border-2 border-dashed rounded-xl p-12 text-center transition-all cursor-pointer ${dragActive
-                        ? 'border-indigo-500 bg-indigo-500/10 scale-[1.02]'
-                        : preview
-                            ? 'border-gray-700 bg-gray-900/50'
-                            : 'border-gray-700 hover:border-gray-600 hover:bg-gray-900/30'
+                    ? 'border-indigo-500 bg-indigo-500/10 scale-[1.02]'
+                    : preview
+                        ? 'border-gray-700 bg-gray-900/50'
+                        : 'border-gray-700 hover:border-gray-600 hover:bg-gray-900/30'
                     }`}
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}

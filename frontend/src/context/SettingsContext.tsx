@@ -23,8 +23,8 @@ export interface SettingsState {
 
 const DEFAULT_SETTINGS: SettingsState = {
     apiKey: '',
-    provider: 'gemini',
-    model: 'gemini-2.0-flash-exp',
+    provider: 'openai',
+    model: 'gpt-4o',
 
     llmParams: {
         'temperature': { value: 0.7, enabled: false },
