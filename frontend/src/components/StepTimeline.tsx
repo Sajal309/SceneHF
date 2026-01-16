@@ -22,7 +22,7 @@ export function StepTimeline({ jobId, steps, selectedStep, onSelectStep }: StepT
             case StepStatus.FAILED:
                 return 'badge-failed';
             case StepStatus.CANCELLED:
-                return 'bg-slate-700 text-slate-400';
+                return 'bg-[var(--panel-contrast)] text-[var(--text-subtle)]';
             default:
                 return 'badge-queued';
         }
@@ -41,7 +41,7 @@ export function StepTimeline({ jobId, steps, selectedStep, onSelectStep }: StepT
 
     if (steps.length === 0) {
         return (
-            <div className="text-slate-400 text-sm text-center py-8">
+            <div className="text-[var(--text-subtle)] text-sm text-center py-8">
                 No steps yet. Click "Plan" to generate steps.
             </div>
         );
@@ -54,13 +54,13 @@ export function StepTimeline({ jobId, steps, selectedStep, onSelectStep }: StepT
                     key={step.id}
                     onClick={() => onSelectStep(step)}
                     className={`p-3 rounded-lg cursor-pointer transition-all ${selectedStep?.id === step.id
-                        ? 'bg-primary-600/20 border border-primary-500'
-                        : 'bg-slate-700/50 hover:bg-slate-700 border border-transparent'
+                        ? 'bg-[var(--accent-soft)] border border-[var(--accent)]'
+                        : 'bg-[var(--panel)] hover:bg-[var(--panel-muted)] border border-transparent'
                         }`}
                 >
                     <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
-                            <span className="text-slate-400 text-xs font-mono">
+                            <span className="text-[var(--text-subtle)] text-xs font-mono">
                                 #{index + 1}
                             </span>
                             <span className={`badge ${getStatusBadgeClass(step.status)}`}>
@@ -71,7 +71,7 @@ export function StepTimeline({ jobId, steps, selectedStep, onSelectStep }: StepT
                         {(step.status === StepStatus.RUNNING || step.status === StepStatus.QUEUED) && (
                             <button
                                 onClick={(e) => handleStop(e, step.id)}
-                                className="p-1 text-slate-500 hover:text-red-400 transition-colors"
+                                className="p-1 text-[var(--text-subtle)] hover:text-[var(--danger)] transition-colors"
                                 title="Stop Generation"
                             >
                                 <Cross2Icon className="w-4 h-4" />
@@ -79,16 +79,16 @@ export function StepTimeline({ jobId, steps, selectedStep, onSelectStep }: StepT
                         )}
                     </div>
 
-                    <div className="text-white text-sm font-medium mb-1">
+                    <div className="text-[var(--text)] text-sm font-medium mb-1">
                         {step.name}
                     </div>
 
-                    <div className="text-slate-400 text-xs">
+                    <div className="text-[var(--text-subtle)] text-xs">
                         {step.type}
                     </div>
 
                     {step.validation && (
-                        <div className="mt-2 text-xs text-slate-400">
+                        <div className="mt-2 text-xs text-[var(--text-subtle)]">
                             {step.validation.notes}
                         </div>
                     )}

@@ -191,6 +191,50 @@ class Validator:
                 notes=f"Validation error: {str(e)}"
             )
 
+    def validate_reframe(
+        self,
+        image_path: str,
+        source_image_path: str,
+        validation_rules: Dict[str, float]
+    ) -> ValidationResult:
+        """
+        Validate a reframe output (16:9 aspect ratio expected).
+        """
+        try:
+            img = Image.open(image_path)
+            width, height = img.size
+            ratio = width / height if height else 0
+            target_ratio = 16 / 9
+            tolerance = validation_rules.get("aspect_tolerance", 0.03)
+            ratio_diff = abs(ratio - target_ratio)
+
+            metrics = {
+                "aspect_ratio": float(ratio),
+                "aspect_ratio_diff": float(ratio_diff)
+            }
+
+            if ratio_diff > tolerance:
+                return ValidationResult(
+                    passed=False,
+                    status=StepStatus.NEEDS_REVIEW,
+                    metrics=metrics,
+                    notes=f"Aspect ratio off (got {ratio:.3f}, expected ~1.778)"
+                )
+
+            return ValidationResult(
+                passed=True,
+                status=StepStatus.SUCCESS,
+                metrics=metrics,
+                notes="Reframe validation passed"
+            )
+        except Exception as e:
+            return ValidationResult(
+                passed=False,
+                status=StepStatus.FAILED,
+                metrics={},
+                notes=f"Validation error: {str(e)}"
+            )
+
 
 # Global validator instance
 validator = Validator()

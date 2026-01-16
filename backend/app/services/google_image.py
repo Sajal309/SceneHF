@@ -132,5 +132,7 @@ def get_google_image_service(api_key: Optional[str] = None) -> Optional[GoogleIm
     try:
         return GoogleImageService(api_key=api_key)
     except Exception as e:
-        print(f"Google Image service not available: {e}")
+        # Don't print for missing API keys, as this is common when using other providers
+        if "API key not provided" not in str(e):
+            print(f"Google Image service not available: {e}")
         return None

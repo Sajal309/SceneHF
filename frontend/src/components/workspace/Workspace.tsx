@@ -4,8 +4,9 @@ import { api, Job, JobStatus } from '../../lib/api';
 import { UploadCard } from '../UploadCard';
 import { SceneEditor } from './SceneEditor';
 import { StepList } from './StepList';
+import { MaskPopup } from './MaskPopup';
 import { LogsPanel } from '../LogsPanel';
-import { PlayIcon, PauseIcon } from '@radix-ui/react-icons';
+import { PauseIcon } from '@radix-ui/react-icons';
 import { useJobSSE } from '../../lib/sse';
 
 interface WorkspaceProps {
@@ -17,7 +18,7 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
     const { settings } = useSettings();
     const [job, setJob] = useState<Job | null>(null);
     const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
+    const [maskStepId, setMaskStepId] = useState<string | null>(null);
     const [logs, setLogs] = useState<any[]>([]);
 
     // Persist job ID to localStorage
@@ -30,13 +31,20 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
     // SSE for live updates
     const handleJobUpdate = useCallback((updatedJob: Job) => {
         setJob(prev => {
-            // Merge assets to prevent loss during concurrent updates
-            if (prev && prev.assets && updatedJob.assets) {
+            // Always merge assets to prevent loss during concurrent updates
+            if (prev?.assets && updatedJob?.assets) {
+                const mergedAssets = { ...prev.assets, ...updatedJob.assets };
+                console.log('[SSE] Merging assets:', {
+                    prevCount: Object.keys(prev.assets).length,
+                    newCount: Object.keys(updatedJob.assets).length,
+                    mergedCount: Object.keys(mergedAssets).length
+                });
                 return {
                     ...updatedJob,
-                    assets: { ...prev.assets, ...updatedJob.assets }
+                    assets: mergedAssets
                 };
             }
+            // If no previous assets or new job has no assets, use what we have
             return updatedJob;
         });
     }, []);
@@ -44,11 +52,22 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
     const handleStepUpdate = useCallback((updatedStep: any) => {
         setJob(prev => {
             if (!prev) return null;
-            // Preserve all assets when updating steps
+
+            console.log('[SSE] Step update:', {
+                stepId: updatedStep.id,
+                assetCount: prev.assets ? Object.keys(prev.assets).length : 0
+            });
+
+            // Update the specific step while preserving everything else
+            const updatedSteps = prev.steps.map(s =>
+                s.id === updatedStep.id ? updatedStep : s
+            );
+
             return {
                 ...prev,
-                steps: prev.steps.map(s => s.id === updatedStep.id ? updatedStep : s),
-                assets: prev.assets // Explicitly preserve assets
+                steps: updatedSteps,
+                // Explicitly preserve assets - don't let them be overwritten
+                assets: prev.assets || {}
             };
         });
     }, []);
@@ -57,7 +76,7 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
         setLogs(prev => [...prev, log]);
     }, []);
 
-    const { isConnected } = useJobSSE(jobId, {
+    useJobSSE(jobId, {
         onJobUpdate: handleJobUpdate,
         onStepUpdate: handleStepUpdate,
         onLog: handleLog
@@ -78,6 +97,11 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
         const loadJob = async () => {
             try {
                 const jobData = await api.getJob(jobId);
+                console.log('[API] Loaded job:', {
+                    jobId,
+                    assetCount: jobData.assets ? Object.keys(jobData.assets).length : 0,
+                    stepCount: jobData.steps.length
+                });
                 setJob(jobData);
             } catch (error) {
                 console.error('Failed to load job:', error);
@@ -90,7 +114,6 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
     const handlePlan = async () => {
         if (!job) return;
 
-        setLoading(true);
         try {
             const headers = getApiHeaders(settings);
 
@@ -119,8 +142,6 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
         } catch (error) {
             console.error('Planning failed:', error);
             alert(`Planning failed: ${error instanceof Error ? error.message : String(error)}`);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -128,7 +149,8 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
         if (!job) return;
 
         try {
-            await api.runJob(job.id);
+            const headers = getApiHeaders(settings);
+            await api.runJob(job.id, headers);
         } catch (error) {
             console.error('Run failed:', error);
         }
@@ -138,13 +160,14 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
         if (!job) return;
 
         try {
+            const headers = getApiHeaders(settings);
             const step = job.steps.find(s => s.id === stepId);
             if (!step) return;
 
             const prompt = customPrompt || step.custom_prompt || step.prompt;
             const imageConfig = step.image_config || (job.metadata?.image_config || {});
 
-            await api.retryStep(job.id, stepId, prompt, imageConfig);
+            await api.retryStep(job.id, stepId, prompt, imageConfig, headers);
         } catch (error) {
             console.error('Rerun failed:', error);
         }
@@ -157,6 +180,16 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
             await api.stopStep(job.id, stepId);
         } catch (error) {
             console.error('Stop failed:', error);
+        }
+    };
+
+    const handleBgRemove = async (stepId: string) => {
+        if (!job) return;
+        try {
+            const headers = getApiHeaders(settings);
+            await api.bgRemoveStep(job.id, stepId, headers);
+        } catch (error) {
+            console.error('BG remove failed:', error);
         }
     };
 
@@ -173,25 +206,32 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
     // No job selected
     if (!jobId || !job) {
         return (
-            <div className="h-full flex items-center justify-center bg-gray-950">
+            <div className="h-full flex items-center justify-center bg-[var(--bg)]">
                 <UploadCard onJobCreated={onJobCreated} />
             </div>
         );
     }
 
     return (
-        <div className="h-full flex bg-gray-950">
+        <div className="h-full flex bg-[var(--bg)]">
             {/* Main 2-Column Layout */}
             <div className="flex-1 flex">
                 {/* Center: Scene Editor */}
-                <SceneEditor
-                    job={job}
-                    selectedStep={currentStep}
-                    onRunPlan={job.status === 'IDLE' ? handlePlan : handleRun}
-                    onRerunStep={handleRerunStep}
-                    onClearScene={handleClearScene}
-                    onNewScene={() => onJobCreated(null as any)}
-                />
+                <div className="flex-1 flex flex-col min-h-0">
+                    <SceneEditor
+                        job={job}
+                        selectedStep={currentStep}
+                        onRunPlan={handlePlan}
+                        onRerunStep={handleRerunStep}
+                        onBgRemove={handleBgRemove}
+                        onClearScene={handleClearScene}
+                        onNewScene={() => onJobCreated(null as any)}
+                    />
+
+                    <div className="h-56 border-t border-[var(--border)]">
+                        <LogsPanel logs={logs} />
+                    </div>
+                </div>
 
                 <div className="absolute top-4 right-80 pr-4 z-50">
                     <button
@@ -205,7 +245,7 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
                                 console.error("Failed to pause all", e);
                             }
                         }}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-500 border border-yellow-500/50 rounded-lg text-xs font-semibold backdrop-blur-sm transition-all shadow-lg"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-[var(--panel)] hover:bg-[var(--panel-contrast)] text-[var(--text)] border border-[var(--border)] rounded-lg text-xs font-semibold transition-all shadow-sm"
                         title="Pause all running requests"
                     >
                         <PauseIcon className="w-3.5 h-3.5" />
@@ -220,14 +260,15 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
                     onSelectStep={(step) => setSelectedStepId(step.id)}
                     onRerunStep={(stepId) => handleRerunStep(stepId)}
                     onStopStep={handleStopStep}
+                    onOpenMask={(stepId) => setMaskStepId(stepId)}
                 />
             </div>
-
-            {/* Logs Panel (bottom overlay) */}
-            {logs.length > 0 && (
-                <div className="absolute bottom-0 left-0 right-0 h-48 flex flex-col z-10 shadow-xl">
-                    <LogsPanel logs={logs} />
-                </div>
+            {maskStepId && job.steps.find((s) => s.id === maskStepId) && (
+                <MaskPopup
+                    job={job}
+                    step={job.steps.find((s) => s.id === maskStepId)!}
+                    onClose={() => setMaskStepId(null)}
+                />
             )}
         </div>
     );

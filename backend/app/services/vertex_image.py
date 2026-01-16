@@ -89,5 +89,5 @@ def get_vertex_image_service() -> Optional[VertexImageService]:
         return None
 
 
-# Global service instance (for legacy support if needed)
-vertex_service = get_vertex_image_service()
+# Note: Removed global vertex_service instance to prevent warnings on every import.
+# Callers should use get_vertex_image_service() when needed.

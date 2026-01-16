@@ -11,17 +11,54 @@ from fastapi.responses import FileResponse
 from app.models.schemas import (
     Job, Step, StepType, StepStatus, StepAction,
     JobStatus, AssetKind, JobCreateResponse,
-    PlanRequest, RetryRequest, PlateAndRetryRequest
+    PlanRequest, RetryRequest, PlateAndRetryRequest,
+    PromptVariationsRequest, StepPatchRequest, MaskMode, ReframeRequest, PlanStep, Plan
 )
 from app.core.storage import storage
 from app.core.pubsub import pubsub
 from app.core.runner import runner
 from app.services.planner import planner
-from app.services.vertex_image import vertex_service
+from app.services.vertex_image import get_vertex_image_service
 from app.services.fal_bgremove import fal_service
+from app.core.masks import load_mask_binary
 
 
 router = APIRouter()
+
+
+def _update_job_keys_from_headers(
+    job,
+    x_google: Optional[str] = None,
+    x_openai: Optional[str] = None,
+    x_image: Optional[str] = None
+):
+    """Update job metadata keys if headers are provided."""
+    if not job.metadata:
+        job.metadata = {}
+    
+    changed = False
+    
+    # Update image API key if explicitly provided
+    if x_image and job.metadata.get("image_api_key") != x_image:
+        job.metadata["image_api_key"] = x_image
+        changed = True
+    
+    # Fallback/Update logic: reuse google/openai keys if image key is still missing
+    # or if we want to ensure latest keys are stored
+    img_config = job.metadata.get("image_config", {})
+    provider = img_config.get("provider", "openai")
+    
+    if not job.metadata.get("image_api_key"):
+        if provider == "google" or provider == "vertex": # Vertex often falls back to google/gemini
+            if x_google:
+                job.metadata["image_api_key"] = x_google
+                changed = True
+        elif provider == "openai":
+            if x_openai:
+                job.metadata["image_api_key"] = x_openai
+                changed = True
+            
+    return changed
 
 
 @router.post("/jobs", response_model=JobCreateResponse)
@@ -68,6 +105,84 @@ async def delete_job(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     
     return {"message": "Job deleted"}
+
+
+@router.post("/jobs/{job_id}/assets/mask")
+async def upload_mask(job_id: str, file: UploadFile = File(...)):
+    """
+    Upload a mask image for a job. Stored as a binary (0/255) mask.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported.")
+
+    temp_path = Path(f"/tmp/{uuid.uuid4()}{Path(file.filename).suffix}")
+    processed_path = temp_path.with_suffix(".png")
+
+    try:
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        mask = load_mask_binary(str(temp_path))
+        width, height = mask.size
+        mask.save(processed_path)
+
+        asset = storage.save_asset(job_id, str(processed_path), AssetKind.MASK, job=job)
+        pubsub.emit_log(job_id, f"Mask uploaded: {asset.id}")
+
+        return {"asset_id": asset.id, "width": width, "height": height}
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+        if processed_path.exists():
+            processed_path.unlink()
+
+
+@router.patch("/jobs/{job_id}/steps/{step_id}")
+async def patch_step(job_id: str, step_id: str, request: StepPatchRequest):
+    """
+    Patch a step's mask fields.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    step = next((s for s in job.steps if s.id == step_id), None)
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+
+    fields_set = request.model_fields_set
+
+    if "mask_mode" in fields_set:
+        step.mask_mode = request.mask_mode or MaskMode.NONE
+        if step.mask_mode == MaskMode.NONE:
+            step.mask_asset_id = None
+            step.mask_intent = None
+
+    if "mask_asset_id" in fields_set:
+        if request.mask_asset_id is None:
+            step.mask_asset_id = None
+        else:
+            if request.mask_asset_id not in job.assets:
+                raise HTTPException(status_code=404, detail="Mask asset not found")
+            asset = job.assets[request.mask_asset_id]
+            if asset.kind != AssetKind.MASK:
+                raise HTTPException(status_code=400, detail="Asset is not a mask")
+            step.mask_asset_id = request.mask_asset_id
+
+    if "mask_intent" in fields_set:
+        step.mask_intent = request.mask_intent
+
+    if "mask_prompt" in fields_set:
+        step.mask_prompt = request.mask_prompt
+
+    storage.save_job(job)
+    pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
+
+    return step.model_dump(mode='json')
 
 
 @router.get("/jobs")
@@ -156,15 +271,86 @@ async def plan_job(
             layer_count=request.layer_count,
             layer_map=request.layer_map
         )
+
+        # Enforce layer count if provided and planner under-produces EXTRACT steps
+        if request.layer_count and request.layer_map:
+            extract_steps = [s for s in plan.steps if s.type == StepType.EXTRACT]
+            if len(extract_steps) < request.layer_count:
+                pubsub.emit_log(
+                    job_id,
+                    f"Planner returned {len(extract_steps)} extracts, expected {request.layer_count}. Building fallback steps.",
+                    level="warning"
+                )
+                fallback_steps = []
+                for layer in sorted(request.layer_map, key=lambda x: x.get('index', 0)):
+                    layer_name = layer.get("name", "Layer")
+                    fallback_steps.append(PlanStep(
+                        id=f"s{layer.get('index', len(fallback_steps) + 1)}",
+                        name=f"Extract {layer_name}",
+                        type=StepType.EXTRACT,
+                        target=layer_name,
+                        prompt=f"Extract {layer_name} on a solid white background. Preserve alignment, framing, and lighting.",
+                        prompt_variations=[],
+                        validation_rules={"min_nonwhite": 0.01, "max_nonwhite": 0.35},
+                        fallbacks=[]
+                    ))
+                plan = Plan(
+                    scene_summary=plan.scene_summary,
+                    global_rules=plan.global_rules,
+                    steps=fallback_steps
+                )
+
+        # Ensure prompt variations exist for each step
+        for plan_step in plan.steps:
+            variations = [v.strip() for v in plan_step.prompt_variations if isinstance(v, str) and v.strip()]
+            if len(variations) < 2:
+                try:
+                    generated = await asyncio.to_thread(
+                        planner.generate_variations,
+                        plan_step.prompt,
+                        request.provider,
+                        request.llm_config,
+                        api_key
+                    )
+                    variations = [v.strip() for v in generated if isinstance(v, str) and v.strip()]
+                except Exception as e:
+                    pubsub.emit_log(job_id, f"Variation generation failed for {plan_step.id}: {e}", level="warning")
+                    variations = []
+
+            # Ensure original prompt is included and keep unique ordering
+            unique_variations = []
+            for v in [plan_step.prompt] + variations:
+                if v and v not in unique_variations:
+                    unique_variations.append(v)
+            plan_step.prompt_variations = unique_variations
+
         job.plan = plan
         
         # Store image config in job metadata if provided
-        if request.image_config:
+        if request.image_config is not None:
             if not job.metadata:
                 job.metadata = {}
             job.metadata["image_config"] = request.image_config
-            if x_image_api_key:
-                job.metadata["image_api_key"] = x_image_api_key
+            
+            # API Key Fallback: If image API key is missing, potentially reuse planning keys
+            img_key = x_image_api_key
+            if not img_key:
+                # If image provider matches planning provider, reuse that key
+                image_provider = request.image_config.get("provider")
+                planning_provider = request.provider
+                
+                # Handle mapping: gemini (planner) -> google (image)
+                is_google_family = (image_provider == "google" and planning_provider == "gemini")
+                is_openai_family = (image_provider == "openai" and planning_provider == "openai")
+                
+                if image_provider == planning_provider or is_google_family or is_openai_family:
+                    img_key = api_key
+                elif not image_provider:
+                    # If no specific image provider, just use the planning key as a general fallback
+                    img_key = api_key
+            
+            if img_key:
+                job.metadata["image_api_key"] = img_key
         
         # Create steps from plan
         job.steps = []
@@ -175,6 +361,7 @@ async def plan_job(
                 name=plan_step.name,
                 type=plan_step.type,
                 prompt=plan_step.prompt,
+                prompt_variations=plan_step.prompt_variations,
                 status=StepStatus.QUEUED
             )
             job.steps.append(step)
@@ -203,7 +390,13 @@ async def plan_job(
 
 
 @router.post("/jobs/{job_id}/run")
-async def run_job(job_id: str, background_tasks: BackgroundTasks):
+async def run_job(
+    job_id: str, 
+    background_tasks: BackgroundTasks,
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+):
     """
     Run all steps in the job sequentially.
     """
@@ -211,20 +404,91 @@ async def run_job(job_id: str, background_tasks: BackgroundTasks):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
+    # Always take frontend key for access
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key):
+        storage.save_job(job)
+        pubsub.emit_log(job_id, "Updated API keys from frontend")
+    
     # Run in background
     background_tasks.add_task(runner.run_job, job_id)
     
     return {"message": "Job execution started"}
 
 
+@router.post("/jobs/{job_id}/reframe")
+async def reframe_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    request: ReframeRequest = ReframeRequest(),
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+):
+    """
+    Create and run a single reframe step (16:9).
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if request.image_config is not None:
+        if not job.metadata:
+            job.metadata = {}
+        job.metadata["image_config"] = request.image_config
+        if not job.metadata.get("image_api_key"):
+            image_provider = request.image_config.get("provider")
+            if image_provider == "google" and x_google_api_key:
+                job.metadata["image_api_key"] = x_google_api_key
+            elif image_provider == "openai" and x_openai_api_key:
+                job.metadata["image_api_key"] = x_openai_api_key
+
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key):
+        storage.save_job(job)
+        pubsub.emit_log(job_id, "Updated API keys from frontend")
+
+    step_id = str(uuid.uuid4())
+    step = Step(
+        id=step_id,
+        index=len(job.steps),
+        name="Reframe 16:9",
+        type=StepType.REFRAME,
+        prompt=request.prompt or "Reframe this image in 16:9.",
+        status=StepStatus.QUEUED,
+        input_asset_id=job.source_image,
+        image_config=request.image_config
+    )
+    job.steps.append(step)
+    job.status = JobStatus.RUNNING
+    storage.save_job(job)
+
+    pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
+    pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
+
+    background_tasks.add_task(runner.run_step, job_id, step_id)
+
+    return {"message": "Reframe started", "step_id": step_id}
+
+
 @router.post("/jobs/{job_id}/steps/{step_id}/run")
-async def run_step(job_id: str, step_id: str, background_tasks: BackgroundTasks):
+async def run_step(
+    job_id: str, 
+    step_id: str, 
+    background_tasks: BackgroundTasks,
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+):
     """
     Run a single step.
     """
     job = storage.load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Always take frontend key for access
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key):
+        storage.save_job(job)
+        pubsub.emit_log(job_id, "Updated API keys from frontend")
     
     step = next((s for s in job.steps if s.id == step_id), None)
     if not step:
@@ -236,12 +500,57 @@ async def run_step(job_id: str, step_id: str, background_tasks: BackgroundTasks)
     return {"message": "Step execution started"}
 
 
+@router.post("/jobs/{job_id}/steps/{step_id}/variations")
+async def get_prompt_variations(
+    job_id: str,
+    step_id: str,
+    request: PromptVariationsRequest,
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key")
+):
+    """
+    Generate variations for a step's prompt.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    step = next((s for s in job.steps if s.id == step_id), None)
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    
+    # Determine API key based on provider
+    api_key = None
+    if request.provider == "gemini":
+        api_key = x_google_api_key
+    elif request.provider == "openai":
+        api_key = x_openai_api_key
+
+    try:
+        current_prompt = step.custom_prompt or step.prompt
+        variations = await asyncio.to_thread(
+            planner.generate_variations,
+            current_prompt,
+            request.provider,
+            request.llm_config,
+            api_key
+        )
+        return {"variations": variations}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/jobs/{job_id}/steps/{step_id}/retry")
 async def retry_step(
     job_id: str,
     step_id: str,
     request: RetryRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
 ):
     """
     Retry a step with a custom prompt.
@@ -249,6 +558,9 @@ async def retry_step(
     job = storage.load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Always take frontend key for access
+    _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key)
     
     step = next((s for s in job.steps if s.id == step_id), None)
     if not step:
@@ -274,7 +586,10 @@ async def retry_step(
 async def bg_remove_step(
     job_id: str,
     step_id: str,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
 ):
     """
     Apply Fal.ai background removal to step output.
@@ -282,6 +597,9 @@ async def bg_remove_step(
     job = storage.load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Always take frontend key for access
+    _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key)
     
     step = next((s for s in job.steps if s.id == step_id), None)
     if not step:
@@ -429,6 +747,82 @@ async def plate_and_retry(
     background_tasks.add_task(do_plate_and_retry)
     
     return {"message": "Plate and retry started"}
+
+
+@router.post("/jobs/{job_id}/steps/{step_id}/replace-image")
+async def replace_step_image(
+    job_id: str,
+    step_id: str,
+    file: UploadFile = File(...),
+    target: str = "output"
+):
+    """
+    Replace a step's input or output image via file upload.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    step = next((s for s in job.steps if s.id == step_id), None)
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+
+    if target not in ("output", "input"):
+        raise HTTPException(status_code=400, detail="Invalid target. Use 'output' or 'input'.")
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported.")
+
+    temp_path = Path(f"/tmp/{uuid.uuid4()}{Path(file.filename).suffix}")
+    try:
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        if target == "output":
+            if step.type == StepType.EXTRACT:
+                asset_kind = AssetKind.LAYER
+            elif step.type == StepType.REMOVE:
+                asset_kind = AssetKind.PLATE
+            else:
+                asset_kind = AssetKind.BG_REMOVED
+        else:
+            asset_kind = AssetKind.SOURCE
+
+        asset = storage.save_asset(job_id, str(temp_path), asset_kind, job=job)
+
+        if target == "output":
+            step.output_asset_id = asset.id
+            step.validation = None
+            if step.status in (StepStatus.FAILED, StepStatus.CANCELLED):
+                step.status = StepStatus.NEEDS_REVIEW
+        else:
+            step.input_asset_id = asset.id
+            step.output_asset_id = None
+            step.status = StepStatus.QUEUED
+            step.validation = None
+
+        # If this is a clean plate, feed it forward to later steps
+        if target == "output" and step.type == StepType.REMOVE:
+            if not job.metadata:
+                job.metadata = {}
+            previous_plate_id = job.metadata.get("latest_plate_asset_id")
+            for future_step in job.steps:
+                if future_step.index <= step.index:
+                    continue
+                if future_step.input_asset_id is None or future_step.input_asset_id == previous_plate_id:
+                    future_step.input_asset_id = asset.id
+            job.metadata["latest_plate_asset_id"] = asset.id
+
+        storage.save_job(job)
+
+        pubsub.emit_log(job_id, f"Replaced {target} image for step: {step.name}")
+        pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
+        pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
+
+        return {"message": "Image replaced", "asset_id": asset.id, "target": target}
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 @router.post("/jobs/{job_id}/steps/{step_id}/accept")

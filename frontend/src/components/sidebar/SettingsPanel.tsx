@@ -15,39 +15,39 @@ function ParamList({ title, params, onUpdate, onAdd, onDelete }: ParamListProps)
 
     return (
         <div className="space-y-2 mt-3">
-            <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{title}</h4>
+            <h4 className="text-[10px] font-bold text-[var(--text-subtle)] uppercase tracking-widest">{title}</h4>
             <div className="space-y-2">
                 {Object.entries(params).map(([key, data]) => (
                     <div key={key} className="flex items-center gap-2 group">
                         <button
                             onClick={() => onUpdate(key, { enabled: !data.enabled })}
-                            className={`p-1 rounded transition-colors ${data.enabled ? 'text-indigo-500 bg-indigo-500/10' : 'text-gray-600 hover:bg-gray-800'}`}
+                            className={`p-1 rounded transition-colors ${data.enabled ? 'text-[var(--accent)] bg-[var(--accent-soft)]' : 'text-[var(--text-subtle)] hover:bg-[var(--panel-contrast)]'}`}
                         >
                             {data.enabled ? <CheckboxIcon /> : <SquareIcon />}
                         </button>
                         <div className="flex-1 min-w-0">
-                            <div className="text-[11px] text-gray-400 font-mono truncate">{key}</div>
+                            <div className="text-[11px] text-[var(--text-subtle)] font-mono truncate">{key}</div>
                             <input
                                 type="text"
-                                className="w-full bg-transparent border-b border-gray-800 focus:border-indigo-500 outline-none text-xs py-0.5 text-gray-200"
+                                className="w-full bg-transparent border-b border-[var(--border)] focus:border-[var(--accent)] outline-none text-xs py-0.5 text-[var(--text)]"
                                 value={String(data.value)}
                                 onChange={(e) => onUpdate(key, { value: e.target.value })}
                             />
                         </div>
                         <button
                             onClick={() => onDelete(key)}
-                            className="p-1 text-gray-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                            className="p-1 text-[var(--text-subtle)] hover:text-[var(--danger)] opacity-0 group-hover:opacity-100 transition-all"
                         >
                             <TrashIcon />
                         </button>
                     </div>
                 ))}
             </div>
-            <div className="flex gap-2 mt-2 pt-2 border-t border-gray-800/50">
+            <div className="flex gap-2 mt-2 pt-2 border-t border-[var(--border)]">
                 <input
                     type="text"
                     placeholder="New param..."
-                    className="flex-1 bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1 text-xs outline-none focus:border-indigo-500/50"
+                    className="flex-1 bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1 text-xs outline-none focus:border-[var(--accent)]"
                     value={newKey}
                     onChange={(e) => setNewKey(e.target.value)}
                     onKeyDown={(e) => {
@@ -64,7 +64,7 @@ function ParamList({ title, params, onUpdate, onAdd, onDelete }: ParamListProps)
                             setNewKey('');
                         }
                     }}
-                    className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded transition-colors text-gray-400"
+                    className="p-1.5 bg-[var(--panel-contrast)] hover:bg-[var(--border)] rounded transition-colors text-[var(--text-subtle)]"
                 >
                     <PlusIcon />
                 </button>
@@ -84,19 +84,19 @@ function CollapsibleSection({ title, icon, defaultOpen = true, children }: Colla
     const [isOpen, setIsOpen] = useState(defaultOpen);
 
     return (
-        <section className="border border-gray-800 rounded-lg overflow-hidden bg-gray-900/50">
+        <section className="glass-card rounded-lg overflow-hidden">
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-800/50 transition-colors"
+                className="w-full px-4 py-3 flex items-center justify-between hover:bg-[var(--panel-contrast)] transition-colors"
             >
-                <div className="flex items-center gap-2 text-sm font-semibold text-gray-300">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
                     {icon}
                     <span>{title}</span>
                 </div>
-                {isOpen ? <ChevronDownIcon className="text-gray-500" /> : <ChevronRightIcon className="text-gray-500" />}
+                {isOpen ? <ChevronDownIcon className="text-[var(--text-subtle)]" /> : <ChevronRightIcon className="text-[var(--text-subtle)]" />}
             </button>
             {isOpen && (
-                <div className="px-4 pb-4 space-y-3 border-t border-gray-800/50">
+                <div className="px-4 pb-4 space-y-3 border-t border-[var(--border)]">
                     {children}
                 </div>
             )}
@@ -136,10 +136,10 @@ export function SettingsPanel() {
     };
 
     return (
-        <div className="h-full flex flex-col p-4 bg-gray-900 border-r border-gray-800 w-80 text-gray-300 overflow-y-auto custom-scrollbar">
+        <div className="h-full flex flex-col p-4 glass-panel border-r border-[var(--border)] w-80 text-[var(--text)] overflow-y-auto custom-scrollbar">
             {/* Header */}
-            <div className="flex items-center gap-2 text-white font-bold text-lg mb-6">
-                <MixIcon className="w-6 h-6 text-indigo-500" />
+            <div className="flex items-center gap-2 text-[var(--text)] font-semibold text-lg mb-6">
+                <MixIcon className="w-6 h-6 text-[var(--accent)]" />
                 <span>SceneHF</span>
             </div>
 
@@ -148,9 +148,9 @@ export function SettingsPanel() {
                 <CollapsibleSection title="Text Model (LLM)" icon={<GearIcon className="w-4 h-4 text-indigo-400" />}>
                     <div className="space-y-3 mt-3">
                         <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-gray-500 uppercase">Provider</label>
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Provider</label>
                             <select
-                                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-indigo-500 outline-none"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none"
                                 value={settings.provider}
                                 onChange={(e) => updateSettings({ provider: e.target.value as any })}
                             >
@@ -160,11 +160,11 @@ export function SettingsPanel() {
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-gray-500 uppercase">Model</label>
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Model</label>
                             <input
                                 type="text"
                                 list="model-options"
-                                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-indigo-500 outline-none"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none"
                                 value={settings.model}
                                 onChange={(e) => updateSettings({ model: e.target.value })}
                                 placeholder="e.g. gpt-4o"
@@ -190,12 +190,12 @@ export function SettingsPanel() {
                 </CollapsibleSection>
 
                 {/* Image Generation Configuration */}
-                <CollapsibleSection title="Image Model" icon={<ImageIcon className="w-4 h-4 text-purple-400" />}>
+                <CollapsibleSection title="Image Model" icon={<ImageIcon className="w-4 h-4 text-[var(--accent)]" />}>
                     <div className="space-y-3 mt-3">
                         <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-gray-500 uppercase">Provider</label>
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Provider</label>
                             <select
-                                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-indigo-500 outline-none"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none"
                                 value={settings.imageProvider}
                                 onChange={(e) => updateSettings({ imageProvider: e.target.value as any })}
                             >
@@ -206,11 +206,11 @@ export function SettingsPanel() {
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-gray-500 uppercase">Model</label>
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Model</label>
                             <input
                                 type="text"
                                 list="image-model-options"
-                                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-indigo-500 outline-none"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none"
                                 value={settings.imageModel}
                                 onChange={(e) => {
                                     const val = e.target.value;
@@ -245,15 +245,15 @@ export function SettingsPanel() {
                 </CollapsibleSection>
 
                 {/* API Keys */}
-                <CollapsibleSection title="API Credentials" icon={<PersonIcon className="w-4 h-4 text-green-400" />}>
+                <CollapsibleSection title="API Credentials" icon={<PersonIcon className="w-4 h-4 text-[var(--accent)]" />}>
                     <div className="space-y-3 mt-3">
                         <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-gray-500 uppercase">
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">
                                 {settings.provider === 'gemini' ? 'Google AI Key' : 'OpenAI Key'}
                             </label>
                             <input
                                 type="password"
-                                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-indigo-500 outline-none font-mono"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
                                 value={settings.apiKey}
                                 onChange={(e) => updateSettings({ apiKey: e.target.value })}
                                 placeholder="sk-..."
@@ -261,10 +261,10 @@ export function SettingsPanel() {
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-gray-500 uppercase">Image API Key</label>
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Image API Key</label>
                             <input
                                 type="password"
-                                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-indigo-500 outline-none font-mono"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
                                 value={settings.imageApiKey}
                                 onChange={(e) => updateSettings({ imageApiKey: e.target.value })}
                                 placeholder="sk-..."
@@ -275,8 +275,8 @@ export function SettingsPanel() {
             </div>
 
             {/* Footer */}
-            <div className="mt-6 px-2 py-4 border-t border-gray-800/50">
-                <div className="text-[10px] text-gray-600 font-medium tracking-widest text-center uppercase">
+            <div className="mt-6 px-2 py-4 border-t border-[var(--border)]">
+                <div className="text-[10px] text-[var(--text-subtle)] font-medium tracking-widest text-center uppercase">
                     v2.0.0 Modern Edition
                 </div>
             </div>

@@ -18,6 +18,7 @@ class StepType(str, Enum):
     EXTRACT = "EXTRACT"
     REMOVE = "REMOVE"
     BG_REMOVE = "BG_REMOVE"
+    REFRAME = "REFRAME"
 
 
 class StepStatus(str, Enum):
@@ -34,6 +35,7 @@ class AssetKind(str, Enum):
     SOURCE = "SOURCE"
     PLATE = "PLATE"
     LAYER = "LAYER"
+    MASK = "MASK"
     BG_REMOVED = "BG_REMOVED"
     DEBUG = "DEBUG"
 
@@ -61,6 +63,17 @@ class StepAction(str, Enum):
     PLATE_AND_RETRY = "PLATE_AND_RETRY"
     STOP = "STOP"
 
+class MaskMode(str, Enum):
+    NONE = "NONE"
+    AUTO = "AUTO"
+    MANUAL = "MANUAL"
+
+
+class MaskIntent(str, Enum):
+    INPAINT_REMOVE = "INPAINT_REMOVE"
+    INPAINT_INSERT = "INPAINT_INSERT"
+    EXTRACT_HELPER = "EXTRACT_HELPER"
+
 
 class Step(BaseModel):
     id: str
@@ -70,7 +83,12 @@ class Step(BaseModel):
     status: StepStatus = StepStatus.QUEUED
     input_asset_id: Optional[str] = None
     output_asset_id: Optional[str] = None
+    mask_mode: MaskMode = MaskMode.NONE
+    mask_asset_id: Optional[str] = None
+    mask_intent: Optional[MaskIntent] = None
+    mask_prompt: Optional[str] = None
     prompt: str = ""
+    prompt_variations: List[str] = Field(default_factory=list)
     custom_prompt: Optional[str] = None
     image_config: Optional[Dict[str, Any]] = None
     validation: Optional[ValidationResult] = None
@@ -86,6 +104,7 @@ class PlanStep(BaseModel):
     type: StepType
     target: str = ""
     prompt: str
+    prompt_variations: List[str] = Field(default_factory=list)
     validation_rules: Dict[str, float] = Field(default_factory=dict)
     fallbacks: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -132,3 +151,20 @@ class RetryRequest(BaseModel):
 class PlateAndRetryRequest(BaseModel):
     remove_prompt: str
     retry_prompt: str
+
+
+class PromptVariationsRequest(BaseModel):
+    provider: str
+    llm_config: Dict[str, Any] = Field(default_factory=dict, alias="model_config")
+
+
+class StepPatchRequest(BaseModel):
+    mask_mode: Optional[MaskMode] = None
+    mask_asset_id: Optional[str] = None
+    mask_intent: Optional[MaskIntent] = None
+    mask_prompt: Optional[str] = None
+
+
+class ReframeRequest(BaseModel):
+    image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    prompt: Optional[str] = None

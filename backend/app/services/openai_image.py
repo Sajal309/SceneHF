@@ -256,5 +256,7 @@ def get_openai_image_service(api_key: Optional[str] = None) -> Optional[OpenAIIm
     try:
         return OpenAIImageService(api_key=api_key)
     except (ImportError, ValueError) as e:
-        print(f"OpenAI Image service not available: {e}")
+        # Don't print for missing API keys, as this is common when using other providers
+        if "API key not provided" not in str(e):
+            print(f"OpenAI Image service not available: {e}")
         return None

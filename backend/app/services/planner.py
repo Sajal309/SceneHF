@@ -38,16 +38,18 @@ CRITICAL RULES (must be in every plan):
 5. Follow the user's layer specifications exactly
 6. Generate clean plates (removing the extracted layer) ONLY when extremely necessary (e.g., when the object is large or leaves a complex hole). Do NOT generate a clean plate for every single layer if it's not needed.
 7. If a clean plate IS generated, it MUST have a solid WHITE background. Do NOT generate transparent or checkered backgrounds.
+8. If a scene description is provided, the plan MUST follow it. Do not contradict it or invent elements not described.
 
 For each step, specify:
 - Clear target description matching user's layer map
 - Precise extraction/removal prompt
+- 3-5 prompt variations that preserve the same objective
 - Validation thresholds (min_nonwhite, max_nonwhite for extractions; min_nonwhite for plates)
 - Fallback strategies if validation fails
 
 Return ONLY valid JSON matching this schema:
 {{
-  "scene_summary": "brief description of the scene",
+  "scene_summary": "brief description of the scene (based on the user's description when provided)",
   "global_rules": ["rule 1", "rule 2", ...],
   "steps": [
     {{
@@ -56,6 +58,7 @@ Return ONLY valid JSON matching this schema:
       "type": "EXTRACT",
       "target": "what to extract",
       "prompt": "Detailed prompt for extraction with white background requirement",
+      "prompt_variations": ["variation 1", "variation 2", "variation 3"],
       "validate": {{"min_nonwhite": 0.01, "max_nonwhite": 0.35}},
       "fallbacks": [
         {{"action": "TIGHTEN_PROMPT", "prompt": "More specific prompt"}}
@@ -67,6 +70,7 @@ Return ONLY valid JSON matching this schema:
       "type": "REMOVE",
       "target": "what to remove",
       "prompt": "Detailed prompt for removal/inpainting. MUST specify solid white background.",
+      "prompt_variations": ["variation 1", "variation 2", "variation 3"],
       "validate": {{"min_nonwhite": 0.2}},
       "fallbacks": []
     }}
@@ -131,7 +135,8 @@ class Planner:
         # Build layer instructions
         layer_instructions = ""
         if scene_description:
-            layer_instructions += f"SCENE DESCRIPTION: {scene_description}\n\n"
+            layer_instructions += f"SCENE DESCRIPTION: {scene_description}\n"
+            layer_instructions += "The plan must follow this description exactly.\n\n"
         
         if layer_count and layer_map:
             layer_instructions += f"USER LAYER SPECIFICATIONS:\n"
@@ -311,13 +316,111 @@ class Planner:
         except Exception as e:
             print(f"Gemini Planning Error: {e}")
             raise
-    
+
+    def generate_variations(
+        self,
+        current_prompt: str,
+        provider: Optional[str] = None,
+        model_config: Optional[dict] = None,
+        api_key: Optional[str] = None
+    ) -> List[str]:
+        """
+        Generate 3-5 distinct variations of the current prompt.
+        """
+        use_provider = provider or self.provider
+        config = model_config or {}
+        
+        variation_system_prompt = """You are an expert at prompt engineering for AI image editing.
+Your goal is to provide 3-5 distinct variations of a given prompt.
+
+Each variation must:
+1. Preserve the core objective (what to extract or remove)
+2. Follow these CRITICAL RULES:
+   - No cropping, shifting, or zooming
+   - No new objects, people, animals, text, or logos
+   - Specify solid white (#FFFFFF) background for extractions/plates
+   - Be clear and descriptive
+
+Return ONLY a JSON array of strings, e.g., ["variation 1", "variation 2", "variation 3"]
+Do NOT include any preamble or markdown blocks.
+"""
+
+        if use_provider == "openai":
+            return self._generate_variations_openai(current_prompt, config, api_key, variation_system_prompt)
+        elif use_provider == "gemini":
+            return self._generate_variations_gemini(current_prompt, config, api_key, variation_system_prompt)
+        else:
+            raise ValueError(f"Unknown provider: {use_provider}")
+
+    def _generate_variations_openai(self, prompt: str, config: dict, api_key: str, system_prompt: str) -> List[str]:
+        client = None
+        if api_key:
+            client = OpenAI(api_key=api_key)
+        elif hasattr(self, 'client') and self.provider == "openai":
+            client = self.client
+        
+        if not client:
+            key = os.getenv("OPENAI_API_KEY")
+            if key: client = OpenAI(api_key=key)
+            else: raise ValueError("OpenAI client not initialized")
+
+        model_name = config.get("model", "gpt-4o")
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Generate variations for this prompt: '{prompt}'"}
+                ],
+                response_format={"type": "json_object"} if not model_name.lower().startswith("o1") else None
+            )
+            content = response.choices[0].message.content
+            clean_content = self._clean_json_response(content)
+            data = json.loads(clean_content)
+            if isinstance(data, list): return data
+            if isinstance(data, dict) and "variations" in data: return data["variations"]
+            return [content]
+        except Exception as e:
+            print(f"OpenAI Variation Error: {e}")
+            return [prompt]
+
+    def _generate_variations_gemini(self, prompt: str, config: dict, api_key: str, system_prompt: str) -> List[str]:
+        client = None
+        if api_key:
+            client = genai.Client(api_key=api_key)
+        elif hasattr(self, 'client') and self.provider == "gemini":
+            client = self.client
+        
+        if not client:
+            key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            if key: client = genai.Client(api_key=key)
+            else: raise ValueError("Google client not initialized")
+
+        model_name = config.get("model", "gemini-2.0-flash")
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[system_prompt, f"Generate variations for this prompt: '{prompt}'"],
+                config={"response_mime_type": "application/json"}
+            )
+            clean_content = self._clean_json_response(response.text)
+            data = json.loads(clean_content)
+            if isinstance(data, list): return data
+            if isinstance(data, dict) and "variations" in data: return data["variations"]
+            return [response.text]
+        except Exception as e:
+            print(f"Gemini Variation Error: {e}")
+            return [prompt]
+
     def _parse_plan(self, plan_json: dict) -> Plan:
         """Parse and validate plan JSON."""
         steps = []
         for step_data in plan_json.get("steps", []):
             step_type_str = step_data.get("type", "EXTRACT").upper()
             step_type = StepType[step_type_str] if step_type_str in StepType.__members__ else StepType.EXTRACT
+            prompt_variations = step_data.get("prompt_variations", step_data.get("prompt_variants", []))
+            if not isinstance(prompt_variations, list):
+                prompt_variations = []
             
             steps.append(PlanStep(
                 id=step_data.get("id", f"s{len(steps)+1}"),
@@ -325,6 +428,7 @@ class Planner:
                 type=step_type,
                 target=step_data.get("target", ""),
                 prompt=step_data.get("prompt", ""),
+                prompt_variations=prompt_variations,
                 validation_rules=step_data.get("validate", {}),
                 fallbacks=step_data.get("fallbacks", [])
             ))

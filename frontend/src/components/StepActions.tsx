@@ -115,7 +115,7 @@ export function StepActions({ jobId, step }: StepActionsProps) {
 
     if (!canShowActions) {
         return (
-            <div className="text-slate-500 text-xs italic">
+            <div className="text-[var(--text-subtle)] text-xs italic">
                 Awaiting completion...
             </div>
         );
@@ -129,13 +129,13 @@ export function StepActions({ jobId, step }: StepActionsProps) {
                         <button
                             onClick={handleAccept}
                             disabled={loading}
-                            className="flex-1 px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-emerald-600/30"
+                            className="flex-1 px-3 py-2 bg-green-50 hover:bg-green-100 text-[var(--success)] rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-green-200"
                         >
                             Accept
                         </button>
                         <button
                             onClick={() => setShowEdit(true)}
-                            className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-slate-600"
+                            className="px-3 py-2 bg-[var(--panel-contrast)] hover:bg-[var(--border)] text-[var(--text)] rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-[var(--border)]"
                         >
                             <GearIcon />
                             Edit & Rerun
@@ -145,30 +145,30 @@ export function StepActions({ jobId, step }: StepActionsProps) {
                         <button
                             onClick={handleBgRemove}
                             disabled={loading}
-                            className="w-full px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-indigo-600/30"
+                            className="w-full px-3 py-2 bg-[var(--accent-soft)] hover:bg-blue-100 text-[var(--accent-strong)] rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-blue-200"
                         >
                             Magic BG Removal
                         </button>
                     )}
                 </div>
             ) : (
-                <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 space-y-4 shadow-2xl">
+                <div className="glass-card rounded-lg p-4 space-y-4">
                     <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                        <h4 className="text-xs font-bold text-[var(--text-subtle)] uppercase tracking-wider flex items-center gap-2">
                             <GearIcon />
                             Step Configuration
                         </h4>
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => setShowPreview(!showPreview)}
-                                className={`p-1 rounded transition-colors ${showPreview ? 'text-blue-400 bg-blue-400/10' : 'text-slate-500 hover:text-slate-300'}`}
+                                className={`p-1 rounded transition-colors ${showPreview ? 'text-[var(--accent-strong)] bg-[var(--accent-soft)]' : 'text-[var(--text-subtle)] hover:text-[var(--text)]'}`}
                                 title="Show Request Preview"
                             >
                                 <CodeIcon />
                             </button>
                             <button
                                 onClick={() => setShowEdit(false)}
-                                className="text-slate-500 hover:text-slate-300 transition-colors"
+                                className="text-[var(--text-subtle)] hover:text-[var(--text)] transition-colors"
                             >
                                 <Cross2Icon />
                             </button>
@@ -178,22 +178,22 @@ export function StepActions({ jobId, step }: StepActionsProps) {
                     {!showPreview ? (
                         <>
                             <div className="space-y-2">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Prompt Override</label>
+                                <label className="text-[10px] font-bold text-[var(--text-subtle)] uppercase">Prompt Override</label>
                                 <textarea
                                     value={prompt}
                                     onChange={(e) => setPrompt(e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 min-h-[80px] resize-none"
+                                    className="w-full bg-[var(--panel-muted)] border border-[var(--border)] rounded p-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)] min-h-[80px] resize-none"
                                     placeholder="Custom extraction prompt..."
                                 />
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Provider</label>
+                                    <label className="text-[10px] font-bold text-[var(--text-subtle)] uppercase">Provider</label>
                                     <select
                                         value={config.provider || 'vertex'}
                                         onChange={(e) => updateConfig('provider', e.target.value)}
-                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-xs text-slate-200 focus:outline-none"
+                                        className="w-full bg-[var(--panel-muted)] border border-[var(--border)] rounded p-1 text-xs text-[var(--text)] focus:outline-none"
                                     >
                                         <option value="vertex">Vertex (Imagen)</option>
                                         <option value="openai">OpenAI (DALL-E)</option>
@@ -201,23 +201,23 @@ export function StepActions({ jobId, step }: StepActionsProps) {
                                     </select>
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Model</label>
+                                    <label className="text-[10px] font-bold text-[var(--text-subtle)] uppercase">Model</label>
                                     <input
                                         type="text"
                                         value={config.model || ''}
                                         onChange={(e) => updateConfig('model', e.target.value)}
                                         placeholder="Auto"
-                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-xs text-slate-200 focus:outline-none"
+                                        className="w-full bg-[var(--panel-muted)] border border-[var(--border)] rounded p-1 text-xs text-[var(--text)] focus:outline-none"
                                     />
                                 </div>
                             </div>
 
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Parameters</label>
+                                    <label className="text-[10px] font-bold text-[var(--text-subtle)] uppercase">Parameters</label>
                                     <button
                                         onClick={() => updateConfig(`param_${Date.now()}`, '')}
-                                        className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-bold"
+                                        className="text-[10px] text-[var(--accent-strong)] hover:text-[var(--accent)] flex items-center gap-1 font-bold"
                                     >
                                         <PlusIcon /> Add
                                     </button>
@@ -231,48 +231,48 @@ export function StepActions({ jobId, step }: StepActionsProps) {
                                                     type="text"
                                                     value={k}
                                                     readOnly
-                                                    className="flex-1 bg-slate-900 border border-slate-700 rounded p-1 text-[10px] text-slate-400 focus:outline-none"
+                                                    className="flex-1 bg-[var(--panel-muted)] border border-[var(--border)] rounded p-1 text-[10px] text-[var(--text-subtle)] focus:outline-none"
                                                 />
                                                 <input
                                                     type="text"
                                                     value={String(v)}
                                                     onChange={(e) => updateConfig(k, e.target.value)}
-                                                    className="flex-1 bg-slate-900 border border-slate-700 rounded p-1 text-[10px] text-slate-200 focus:outline-none focus:border-blue-500"
+                                                    className="flex-1 bg-[var(--panel-muted)] border border-[var(--border)] rounded p-1 text-[10px] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
                                                 />
                                                 <button
                                                     onClick={() => removeParam(k)}
-                                                    className="p-1 text-slate-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                                    className="p-1 text-[var(--text-subtle)] hover:text-[var(--danger)] transition-colors opacity-0 group-hover:opacity-100"
                                                 >
                                                     <TrashIcon />
                                                 </button>
                                             </div>
                                         ))}
                                     {Object.entries(config).filter(([k]) => k !== 'provider' && k !== 'model').length === 0 && (
-                                        <div className="text-[10px] text-slate-600 italic">No custom params</div>
+                                        <div className="text-[10px] text-[var(--text-subtle)] italic">No custom params</div>
                                     )}
                                 </div>
                             </div>
                         </>
                     ) : (
                         <div className="space-y-3 animate-in fade-in zoom-in-95 duration-200">
-                            <div className="flex items-center justify-between bg-slate-900 p-1 rounded-t border border-slate-700 border-b-0">
+                            <div className="flex items-center justify-between bg-[var(--panel-muted)] p-1 rounded-t border border-[var(--border)] border-b-0">
                                 <div className="flex gap-1">
                                     <button
                                         onClick={() => setPreviewMode('json')}
-                                        className={`px-2 py-0.5 text-[10px] font-bold rounded ${previewMode === 'json' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                                        className={`px-2 py-0.5 text-[10px] font-bold rounded ${previewMode === 'json' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-subtle)] hover:text-[var(--text)]'}`}
                                     >
                                         JSON
                                     </button>
                                     <button
                                         onClick={() => setPreviewMode('curl')}
-                                        className={`px-2 py-0.5 text-[10px] font-bold rounded ${previewMode === 'curl' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                                        className={`px-2 py-0.5 text-[10px] font-bold rounded ${previewMode === 'curl' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-subtle)] hover:text-[var(--text)]'}`}
                                     >
                                         CURL
                                     </button>
                                 </div>
                                 <button
                                     onClick={() => navigator.clipboard.writeText(previewMode === 'json' ? editedJson : curlCommand)}
-                                    className="p-1 text-slate-500 hover:text-slate-300"
+                                    className="p-1 text-[var(--text-subtle)] hover:text-[var(--text)]"
                                     title="Copy to clipboard"
                                 >
                                     <CopyIcon />
@@ -282,21 +282,21 @@ export function StepActions({ jobId, step }: StepActionsProps) {
                                 value={previewMode === 'json' ? editedJson : curlCommand}
                                 onChange={(e) => previewMode === 'json' && setEditedJson(e.target.value)}
                                 readOnly={previewMode === 'curl'}
-                                className="w-full bg-slate-900 border border-slate-700 border-t-0 rounded-b p-2 text-[11px] font-mono text-blue-300 focus:outline-none focus:border-blue-500 min-h-[200px] resize-none whitespace-pre overflow-x-auto"
+                                className="w-full bg-[var(--panel-muted)] border border-[var(--border)] border-t-0 rounded-b p-2 text-[11px] font-mono text-[var(--accent-strong)] focus:outline-none focus:border-[var(--accent)] min-h-[200px] resize-none whitespace-pre overflow-x-auto"
                             />
-                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
+                            <div className="text-[10px] text-[var(--text-subtle)] flex items-center gap-2">
                                 <UpdateIcon className="w-3 h-3" />
                                 {previewMode === 'json' ? 'Edit JSON above to override the entire request' : 'Read-only CURL preview'}
                             </div>
                         </div>
                     )}
 
-                    <div className="flex gap-2 pt-2 border-t border-slate-700">
+                    <div className="flex gap-2 pt-2 border-t border-[var(--border)]">
                         {showPreview ? (
                             <button
                                 onClick={handleDirectExecute}
                                 disabled={loading}
-                                className="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-emerald-900/20"
+                                className="flex-1 px-3 py-2 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm"
                             >
                                 {loading ? <UpdateIcon className="animate-spin" /> : <RocketIcon className="w-4 h-4" />}
                                 Execute Request
@@ -305,7 +305,7 @@ export function StepActions({ jobId, step }: StepActionsProps) {
                             <button
                                 onClick={handleRerun}
                                 disabled={loading}
-                                className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-blue-900/20"
+                                className="flex-1 px-3 py-2 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm"
                             >
                                 {loading ? <UpdateIcon className="animate-spin" /> : <UpdateIcon />}
                                 Rerun Generation
@@ -316,7 +316,7 @@ export function StepActions({ jobId, step }: StepActionsProps) {
                                 setShowEdit(false);
                                 setShowPreview(false);
                             }}
-                            className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md text-sm font-medium transition-colors"
+                            className="px-3 py-2 bg-[var(--panel-contrast)] hover:bg-[var(--border)] text-[var(--text)] rounded-md text-sm font-medium transition-colors"
                         >
                             Cancel
                         </button>
@@ -326,5 +326,3 @@ export function StepActions({ jobId, step }: StepActionsProps) {
         </div>
     );
 }
-
-

@@ -22,13 +22,15 @@ export enum StepType {
     ANALYZE = 'ANALYZE',
     EXTRACT = 'EXTRACT',
     REMOVE = 'REMOVE',
-    BG_REMOVE = 'BG_REMOVE'
+    BG_REMOVE = 'BG_REMOVE',
+    REFRAME = 'REFRAME'
 }
 
 export enum AssetKind {
     SOURCE = 'SOURCE',
     PLATE = 'PLATE',
     LAYER = 'LAYER',
+    MASK = 'MASK',
     BG_REMOVED = 'BG_REMOVED',
     DEBUG = 'DEBUG'
 }
@@ -57,7 +59,12 @@ export interface Step {
     status: StepStatus;
     input_asset_id?: string;
     output_asset_id?: string;
+    mask_mode?: 'NONE' | 'AUTO' | 'MANUAL';
+    mask_asset_id?: string | null;
+    mask_intent?: 'INPAINT_REMOVE' | 'INPAINT_INSERT' | 'EXTRACT_HELPER' | null;
+    mask_prompt?: string | null;
     prompt: string;
+    prompt_variations?: string[];
     custom_prompt?: string;
     image_config?: Record<string, any>;
     validation?: ValidationResult;
@@ -73,6 +80,7 @@ export interface PlanStep {
     type: StepType;
     target: string;
     prompt: string;
+    prompt_variations?: string[];
     validate: Record<string, number>;
     fallbacks: any[];
 }
@@ -164,28 +172,63 @@ export const api = {
         return res.json();
     },
 
-    async runJob(jobId: string): Promise<{ message: string }> {
+    async runJob(jobId: string, headers: Record<string, string> = {}): Promise<{ message: string }> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}/run`, {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                ...headers
+            }
         });
 
         if (!res.ok) throw new Error('Failed to run job');
         return res.json();
     },
 
-    async runStep(jobId: string, stepId: string): Promise<{ message: string }> {
+    async reframeJob(
+        jobId: string,
+        imageConfig: Record<string, any> = {},
+        headers: Record<string, string> = {}
+    ): Promise<{ message: string; step_id: string }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/reframe`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...headers
+            },
+            body: JSON.stringify({
+                image_config: imageConfig
+            })
+        });
+
+        if (!res.ok) throw new Error('Failed to reframe job');
+        return res.json();
+    },
+
+    async runStep(jobId: string, stepId: string, headers: Record<string, string> = {}): Promise<{ message: string }> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/run`, {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                ...headers
+            }
         });
 
         if (!res.ok) throw new Error('Failed to run step');
         return res.json();
     },
 
-    async retryStep(jobId: string, stepId: string, customPrompt: string, imageConfig?: Record<string, any>): Promise<any> {
+    async retryStep(
+        jobId: string,
+        stepId: string,
+        customPrompt: string,
+        imageConfig?: Record<string, any>,
+        headers: Record<string, string> = {}
+    ): Promise<any> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/retry`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                ...headers
+            },
             body: JSON.stringify({
                 custom_prompt: customPrompt,
                 image_config: imageConfig
@@ -196,9 +239,12 @@ export const api = {
         return res.json();
     },
 
-    async bgRemoveStep(jobId: string, stepId: string): Promise<{ message: string }> {
+    async bgRemoveStep(jobId: string, stepId: string, headers: Record<string, string> = {}): Promise<{ message: string }> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/bg-remove`, {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                ...headers
+            }
         });
 
         if (!res.ok) throw new Error('Failed to remove background');
@@ -246,6 +292,52 @@ export const api = {
         return res.json();
     },
 
+    async replaceStepImage(
+        jobId: string,
+        stepId: string,
+        file: File,
+        target: 'output' | 'input' = 'output'
+    ): Promise<{ message: string; asset_id: string; target: string }> {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/replace-image?target=${target}`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!res.ok) throw new Error('Failed to replace step image');
+        return res.json();
+    },
+
+    async uploadMask(jobId: string, file: File): Promise<{ asset_id: string; width: number; height: number }> {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/assets/mask`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!res.ok) throw new Error('Failed to upload mask');
+        return res.json();
+    },
+
+    async patchStep(
+        jobId: string,
+        stepId: string,
+        payload: { mask_mode?: string; mask_asset_id?: string | null; mask_intent?: string | null; mask_prompt?: string | null }
+    ): Promise<Step> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error('Failed to update step');
+        return res.json();
+    },
+
     async deleteJob(jobId: string): Promise<{ message: string }> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}`, {
             method: 'DELETE'
@@ -259,6 +351,29 @@ export const api = {
             method: 'POST'
         });
         if (!res.ok) throw new Error('Failed to pause all jobs');
+        return res.json();
+    },
+
+    async getPromptVariations(
+        jobId: string,
+        stepId: string,
+        provider: string,
+        modelConfig: Record<string, any>,
+        headers: Record<string, string>
+    ): Promise<{ variations: string[] }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/variations`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...headers
+            },
+            body: JSON.stringify({
+                provider,
+                model_config: modelConfig
+            })
+        });
+
+        if (!res.ok) throw new Error('Failed to get prompt variations');
         return res.json();
     },
 

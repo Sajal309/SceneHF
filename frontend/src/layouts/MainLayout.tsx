@@ -26,12 +26,12 @@ export function MainLayout({ children, onLoadJob }: MainLayoutProps) {
 
     return (
         <SettingsProvider>
-            <div className="flex h-screen w-screen bg-black text-white overflow-hidden font-sans selection:bg-indigo-500/30">
+            <div className="flex h-screen w-screen bg-[var(--bg)] text-[var(--text)] overflow-hidden font-sans selection:bg-[var(--accent-soft)]">
                 {/* Left Sidebar - Settings */}
                 <SettingsPanel />
 
                 {/* Center - Workspace */}
-                <main className="flex-1 h-full min-w-0 flex flex-col bg-gray-950 relative">
+                <main className="flex-1 h-full min-w-0 flex flex-col bg-[var(--bg)] relative">
                     {children}
                 </main>
 
