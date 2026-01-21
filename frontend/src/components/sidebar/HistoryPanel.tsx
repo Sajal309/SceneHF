@@ -254,18 +254,25 @@ export function HistoryPanel({ currentJobId, onLoadJob }: HistoryPanelProps) {
                                                         </div>
 
                                                         <div className="p-3 space-y-2">
-                                                            <div className="flex items-center justify-between">
-                                                                <span className="text-xs font-mono text-[var(--text-subtle)]">
-                                                                    {job.id.slice(0, 8)}
-                                                                </span>
-                                                                <span className={`text-xs px-2 py-0.5 rounded-full ${job.status === 'DONE' ? 'bg-green-100 text-[var(--success)]' :
-                                                                    job.status === 'RUNNING' ? 'bg-blue-100 text-[var(--accent-strong)]' :
-                                                                        job.status === 'FAILED' ? 'bg-red-100 text-[var(--danger)]' :
-                                                                            'bg-[var(--panel-contrast)] text-[var(--text-subtle)]'
-                                                                    }`}>
-                                                                    {job.status}
-                                                                </span>
-                                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigator.clipboard.writeText(job.id);
+                                                    }}
+                                                    className="text-xs font-mono text-[var(--accent-strong)] hover:text-[var(--accent)] underline decoration-dotted"
+                                                    title="Copy job ID"
+                                                >
+                                                    {job.id}
+                                                </button>
+                                                <span className={`text-xs px-2 py-0.5 rounded-full ${job.status === 'DONE' ? 'bg-green-100 text-[var(--success)]' :
+                                                    job.status === 'RUNNING' ? 'bg-blue-100 text-[var(--accent-strong)]' :
+                                                        job.status === 'FAILED' ? 'bg-red-100 text-[var(--danger)]' :
+                                                            'bg-[var(--panel-contrast)] text-[var(--text-subtle)]'
+                                                    }`}>
+                                                    {job.status}
+                                                </span>
+                                            </div>
 
                                                             {stepCount > 0 && (
                                                                 <div className="text-xs text-[var(--text-muted)]">

@@ -1,8 +1,9 @@
-import uuid
 import asyncio
 import os
 from pathlib import Path
 from typing import Optional
+
+from PIL import Image
 
 from app.models.schemas import (
     Job, Step, StepType, StepStatus, StepAction,
@@ -46,10 +47,17 @@ class Runner:
         step = next((s for s in job.steps if s.id == step_id), None)
         if not step:
             raise ValueError(f"Step {step_id} not found")
+
+        run_id = storage.new_run_id()
+        started_at = storage.now_timestamp()
         
         # Check for cancellation
         if step.status == StepStatus.CANCELLED:
             pubsub.emit_log(job_id, f"Step {step.name} was cancelled by user.", level="warning")
+            return step
+        # If job was paused after a "pause all" while this task was queued, bail early
+        if job.status == JobStatus.PAUSED:
+            pubsub.emit_log(job_id, f"Job is paused. Skipping step {step.name}.", level="warning")
             return step
 
         # Check for Job Pause (Global Pause)
@@ -62,6 +70,23 @@ class Runner:
         storage.save_job(job)
         pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
         pubsub.emit_log(job_id, f"Starting step: {step.name}")
+
+        # History scaffold
+        history_record = {
+            "job_id": job_id,
+            "step_id": step_id,
+            "run_id": run_id,
+            "started_at": started_at,
+            "prompt_base": step.prompt,
+            "prompt_custom": custom_prompt or step.custom_prompt,
+            "mask": {},
+            "model": os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"),
+        }
+        
+        validation = None
+        output_asset = None
+        output_path = None
+        error_message = None
         
         try:
             # Get input asset
@@ -76,6 +101,7 @@ class Runner:
             
             # Get source image for validation
             source_path = storage.get_asset_path(job_id, job.source_image)
+            history_record["input_asset_path"] = str(input_path)
             
             # Determine prompt
             prompt = custom_prompt or step.custom_prompt or step.prompt
@@ -87,6 +113,11 @@ class Runner:
                 mask_mode = MaskMode(mask_mode)
             if isinstance(mask_intent, str):
                 mask_intent = MaskIntent(mask_intent)
+            history_record["prompt_full"] = prompt
+            history_record["mask"] = {
+                "mask_mode": mask_mode.value if hasattr(mask_mode, "value") else str(mask_mode),
+                "mask_intent": mask_intent.value if mask_intent else None,
+            }
             
             pubsub.emit_log(job_id, f"Using prompt: {prompt[:200]}...")
             if mask_mode != MaskMode.NONE:
@@ -94,15 +125,33 @@ class Runner:
                 pubsub.emit_log(job_id, f"Mask prompt: {mask_prompt[:200] if mask_prompt else 'None'}")
             
             # Route to appropriate service
-            output_path = None
+            output_img = None
             
             if step.type == StepType.BG_REMOVE:
                 pubsub.emit_log(job_id, "Calling Fal.ai background removal...")
-                output_path = await asyncio.to_thread(
+                tmp_path = await asyncio.to_thread(
                     fal_service.remove_bg,
                     str(input_path),
-                    output_dir=str(storage._assets_dir(job_id))
+                    output_dir=str(storage._assets_subdir(job_id, "derived"))
                 )
+                with Image.open(tmp_path) as img:
+                    output_img = img.copy()
+                # Use derived folder for storage
+                output_asset = storage.save_image(
+                    job_id=job_id,
+                    step_id=step_id,
+                    run_id=run_id,
+                    kind="bg_removed",
+                    pil_image=output_img,
+                    asset_kind=AssetKind.BG_REMOVED,
+                    job=job,
+                    subdir="derived"
+                )
+                output_path = storage.get_asset_path(job_id, output_asset.id)
+                try:
+                    Path(tmp_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
             
             elif step.type in (StepType.EXTRACT, StepType.REMOVE, StepType.REFRAME):
                 # Check if image config specifies provider
@@ -178,6 +227,12 @@ class Runner:
                 if mask_mode != MaskMode.NONE:
                     pubsub.emit_log(job_id, f"Mask mode: {mask_mode.value}.")
                 
+                history_record["prompt_full"] = prompt
+                history_record["mask"] = {
+                    "mask_mode": mask_mode.value if hasattr(mask_mode, "value") else str(mask_mode),
+                    "mask_intent": mask_intent.value if mask_intent else None,
+                }
+                
                 if chosen_provider == "openai":
                     pubsub.emit_log(job_id, "Calling OpenAI image generation...")
                     api_key = job.metadata.get("image_api_key") if job.metadata else None
@@ -186,8 +241,8 @@ class Runner:
                     if not openai_service:
                         raise RuntimeError("OpenAI image service not available")
                     
-                    output_filename = f"output_{uuid.uuid4().hex[:8]}.png"
-                    output_path = str(storage._assets_dir(job_id) / output_filename)
+                    output_filename = f"openai_{run_id}.png"
+                    output_path = str(storage._assets_subdir(job_id, "generations") / output_filename)
                     
                     if step.type == StepType.EXTRACT:
                         output_path = await asyncio.to_thread(
@@ -205,13 +260,15 @@ class Runner:
                             output_path,
                             config=image_config
                         )
+                    with Image.open(output_path) as img:
+                        output_img = img.copy()
+                
                 elif chosen_provider == "google":
+                    from app.services.gemini_image import MODEL_NAME
                     pubsub.emit_log(job_id, "Calling Google image generation (Gemini)...")
                     api_key = job.metadata.get("image_api_key") if job.metadata else None
                     if api_key:
                         os.environ["GEMINI_API_KEY"] = api_key
-                    output_filename = f"output_{uuid.uuid4().hex[:8]}.png"
-                    output_path = str(storage._assets_dir(job_id) / output_filename)
 
                     if mask_mode == MaskMode.MANUAL:
                         if not mask_asset_id:
@@ -220,16 +277,19 @@ class Runner:
                         if not mask_path:
                             raise RuntimeError("Mask asset not found")
                         pubsub.emit_log(job_id, f"Using mask asset: {mask_asset_id}")
-                        from PIL import Image
                         input_img = Image.open(input_path)
                         mask_img = load_mask_binary(str(mask_path))
                         ensure_mask_matches_input(mask_img, input_img)
                         pubsub.emit_log(job_id, f"Mask size: {mask_img.size}, Input size: {input_img.size}")
-                        mask_img.save(mask_path)
+                        # Store mask copy for this run
+                        mask_asset = storage.save_mask(job_id, step_id, run_id, mask_img, job=job)
+                        step.mask_asset_id = mask_asset.id
+                        mask_resolved = storage.get_asset_path(job_id, mask_asset.id)
+                        history_record["mask"]["mask_asset_path"] = str(mask_resolved) if mask_resolved else None
                         output_img = await asyncio.to_thread(
                             edit_image_with_mask,
                             str(input_path),
-                            str(mask_path),
+                            str(mask_resolved),
                             prompt
                         )
                     else:
@@ -238,7 +298,7 @@ class Runner:
                             str(input_path),
                             prompt
                         )
-                    output_img.save(output_path)
+                    history_record["model"] = MODEL_NAME
                 else:
                     # Use Vertex AI
                     pubsub.emit_log(job_id, "Calling Vertex AI image edit...")
@@ -253,18 +313,52 @@ class Runner:
                         v_service.edit_image,
                         str(input_path),
                         prompt,
-                        output_dir=str(storage._assets_dir(job_id))
+                        output_dir=str(storage._assets_subdir(job_id, "generations"))
                     )
+                    with Image.open(output_path) as img:
+                        output_img = img.copy()
             
             else:
                 raise ValueError(f"Unknown step type: {step.type}")
             
-            if not output_path:
+            if output_img is None and not output_path:
                 raise RuntimeError("Service returned no output")
 
+            # FORCE WHITE BACKGROUND: For REMOVE (clean plate) steps, ensure output is solid white
+            if step.type == StepType.REMOVE and output_img:
+                try:
+                    pubsub.emit_log(job_id, "Post-processing: Enforcing white background for clean plate...")
+                    if output_img.mode in ('RGBA', 'LA') or (output_img.mode == 'P' and 'transparency' in output_img.info):
+                        white_bg = Image.new("RGB", output_img.size, (255, 255, 255))
+                        white_bg.paste(output_img, mask=output_img.split()[3] if output_img.mode == 'RGBA' else None)
+                        output_img = white_bg
+                except Exception as e:
+                    pubsub.emit_log(job_id, f"Warning: White background enforcement failed: {e}", level="warning")
+            
+            # Save output asset for Gemini/OpenAI/Vertex paths
+            if output_asset is None:
+                asset_kind = AssetKind.LAYER if step.type == StepType.EXTRACT else AssetKind.PLATE
+                if step.type == StepType.BG_REMOVE:
+                    asset_kind = AssetKind.BG_REMOVED
+                subdir = "generations"
+                kind_label = step.type.value.lower()
+                if custom_prompt:
+                    kind_label = "retry"
+                output_asset = storage.save_image(
+                    job_id=job_id,
+                    step_id=step_id,
+                    run_id=run_id,
+                    kind=kind_label,
+                    pil_image=output_img,
+                    asset_kind=asset_kind,
+                    job=job,
+                    subdir="derived" if asset_kind == AssetKind.BG_REMOVED else subdir,
+                )
+                output_path = storage.get_asset_path(job_id, output_asset.id)
+            
             if step.type == StepType.REFRAME and output_path:
                 try:
-                    from PIL import Image, ImageOps
+                    from PIL import ImageOps
                     with Image.open(output_path) as img:
                         width, height = img.size
                         target_w = width
@@ -279,45 +373,14 @@ class Runner:
                 except Exception as e:
                     pubsub.emit_log(job_id, f"Reframe size enforcement failed: {e}", level="warning")
             
-            pubsub.emit_log(job_id, f"Output generated: {Path(output_path).name}")
+            if output_path:
+                pubsub.emit_log(job_id, f"Output generated: {Path(output_path).name}")
             
-            # Save output asset
-            asset_kind = AssetKind.LAYER if step.type == StepType.EXTRACT else AssetKind.PLATE
-            if step.type == StepType.BG_REMOVE:
-                asset_kind = AssetKind.BG_REMOVED
-            
-            asset = storage.save_asset(
-                job_id,
-                output_path,
-                asset_kind,
-                job=job
-            )
-
-            # FORCE WHITE BACKGROUND: For REMOVE (clean plate) steps, ensure output is solid white
-            if step.type == StepType.REMOVE and output_path:
-                try:
-                    pubsub.emit_log(job_id, "Post-processing: Enforcing white background for clean plate...")
-                    from PIL import Image
-                    
-                    with Image.open(output_path) as img:
-                        # Check if image has transparency or needs flattening
-                        if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                            # Create solid white background
-                            white_bg = Image.new("RGB", img.size, (255, 255, 255))
-                            # Composite
-                            white_bg.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
-                            
-                            # Save back to same path (as PNG to be safe, or keep extension)
-                            white_bg.save(output_path)
-                            pubsub.emit_log(job_id, "Clean plate composited on white background.")
-                        else:
-                             # Even if RGB, verify it's not just black where it should be white (less likely if prompt worked, but safe to leave as is)
-                             pass
-                except Exception as e:
-                    print(f"Failed to enforce white background: {e}")
-                    pubsub.emit_log(job_id, f"Warning: White background enforcement failed: {e}", level="warning")
-            
-            step.output_asset_id = asset.id
+            step.output_asset_id = output_asset.id if output_asset else None
+            if output_asset:
+                step.outputs_history.append(output_asset.id)
+            step.last_run_id = run_id
+            step.last_prompt_used = history_record.get("prompt_full", prompt)
             
             # Validate output
             pubsub.emit_log(job_id, "Validating output...")
@@ -330,26 +393,26 @@ class Runner:
             
             if step.type == StepType.EXTRACT:
                 validation = validator.validate_extraction(
-                    output_path,
+                    str(output_path),
                     str(source_path),
                     validation_rules
                 )
             elif step.type == StepType.REMOVE:
                 validation = validator.validate_plate(
-                    output_path,
+                    str(output_path),
                     str(source_path),
                     validation_rules
                 )
             elif step.type == StepType.REFRAME:
                 validation = validator.validate_reframe(
-                    output_path,
+                    str(output_path),
                     str(source_path),
                     validation_rules
                 )
             else:
                 # BG_REMOVE - basic validation
                 validation = validator.validate_extraction(
-                    output_path,
+                    str(output_path),
                     str(source_path),
                     {"min_nonwhite": 0.01, "max_nonwhite": 0.8}
                 )
@@ -402,12 +465,39 @@ class Runner:
             return step
             
         except Exception as e:
+            error_message = str(e)
             step.status = StepStatus.FAILED
-            step.logs.append(f"Error: {str(e)}")
-            storage.save_job(job)
-            pubsub.emit_log(job_id, f"Step failed: {str(e)}", level="error")
+            step.logs.append(f"Error: {error_message}")
+            step.actions_available = [
+                StepAction.RETRY,
+                StepAction.PLATE_AND_RETRY
+            ]
+            pubsub.emit_log(job_id, f"Step failed: {error_message}", level="error")
             pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
-            raise
+            return step
+        finally:
+            # Write history for Gemini runs when an image existed or an error occurred
+            if output_asset:
+                output_path = storage.get_asset_path(job_id, output_asset.id)
+            finished_at = storage.now_timestamp()
+            history_record["finished_at"] = finished_at
+            history_record["output_asset_path"] = str(output_path) if output_path else None
+            if output_asset:
+                history_record["output_asset_id"] = output_asset.id
+            if validation:
+                history_record["validation"] = {
+                    "status": validation.status.value if hasattr(validation.status, "value") else str(validation.status),
+                    "metrics": validation.metrics,
+                    "notes": validation.notes,
+                }
+            if error_message:
+                history_record["error"] = error_message
+            try:
+                storage.write_history(job_id, step_id, run_id, history_record)
+            except Exception:
+                # Best-effort; do not raise from history writing
+                pass
+            storage.save_job(job)
     
     async def run_job(self, job_id: str) -> Job:
         """

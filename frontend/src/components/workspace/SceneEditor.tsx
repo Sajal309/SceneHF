@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Job as JobType, Step, api } from '../../lib/api';
+import { Job as JobType, Step, api, StepHistoryEntry, Asset } from '../../lib/api';
 import { PlayIcon, ReloadIcon, UpdateIcon, Cross2Icon, PlusIcon } from '@radix-ui/react-icons';
 
 interface SceneEditorProps {
@@ -14,6 +14,9 @@ interface SceneEditorProps {
 
 export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRemove, onClearScene, onNewScene }: SceneEditorProps) {
     const [prompt, setPrompt] = useState('');
+    const [history, setHistory] = useState<StepHistoryEntry[]>([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
 
     // Pre-load prompt when step changes
     useEffect(() => {
@@ -22,10 +25,75 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
         } else {
             setPrompt('');
         }
+        setPreviewAssetId(null);
     }, [selectedStep]);
+
+    useEffect(() => {
+        const fetchHistory = async () => {
+            if (!selectedStep) {
+                setHistory([]);
+                return;
+            }
+            setHistoryLoading(true);
+            try {
+                const res = await api.getStepHistory(job.id, selectedStep.id);
+                setHistory(res.history || []);
+            } catch (error) {
+                console.error('Failed to load history', error);
+            } finally {
+                setHistoryLoading(false);
+            }
+        };
+        fetchHistory();
+    }, [job.id, selectedStep?.id, selectedStep?.last_run_id]);
+
+    const findAssetForRun = (entry: StepHistoryEntry): Asset | undefined => {
+        if (entry.output_asset_id && job.assets?.[entry.output_asset_id]) {
+            return job.assets[entry.output_asset_id];
+        }
+        if (entry.run_id) {
+            const match = Object.values(job.assets || {}).find(
+                (asset) => asset.run_id === entry.run_id && asset.step_id === selectedStep?.id
+            );
+            if (match) return match;
+        }
+        if (selectedStep?.outputs_history?.length) {
+            const fallback = selectedStep.outputs_history
+                .map(id => job.assets[id])
+                .find(a => a && a.run_id === entry.run_id);
+            if (fallback) return fallback;
+        }
+        return undefined;
+    };
+
+    const formatTimestamp = (ts?: string) => {
+        if (!ts) return '—';
+        // Expect YYYYMMDD_HHMMSS_mmm
+        const parts = ts.split('_');
+        if (parts.length >= 2) {
+            const [date, time, msPart] = parts;
+            const year = parseInt(date.slice(0, 4), 10);
+            const month = parseInt(date.slice(4, 6), 10) - 1;
+            const day = parseInt(date.slice(6, 8), 10);
+            const hour = parseInt(time.slice(0, 2), 10);
+            const minute = parseInt(time.slice(2, 4), 10);
+            const second = parseInt(time.slice(4, 6), 10);
+            const ms = msPart ? parseInt(msPart, 10) : 0;
+            const dt = new Date(year, month, day, hour, minute, second, ms);
+            if (!isNaN(dt.getTime())) {
+                return dt.toLocaleString([], { hour: '2-digit', minute: '2-digit' });
+            }
+        }
+        const dt = new Date(ts);
+        if (!isNaN(dt.getTime())) return dt.toLocaleString([], { hour: '2-digit', minute: '2-digit' });
+        return '—';
+    };
 
     // Determine what image to show
     const getDisplayImage = () => {
+        if (previewAssetId) {
+            return api.getAssetUrl(job.id, previewAssetId);
+        }
         if (selectedStep) {
             // Show step output if available, otherwise input
             if (selectedStep.output_asset_id) {
@@ -41,17 +109,42 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
         return null;
     };
 
+    const handleSetActive = async (assetId: string) => {
+        if (!selectedStep) return;
+        try {
+            await api.setActiveOutput(job.id, selectedStep.id, assetId);
+            setPreviewAssetId(null);
+        } catch (error) {
+            console.error('Failed to set active output', error);
+        }
+    };
+
+    const handleOpenInFinder = async () => {
+        try {
+            await api.openInFinder(job.id);
+        } catch (error) {
+            console.error('Failed to open in Finder', error);
+            alert('Unable to open Finder. Please open the storage folder manually.');
+        }
+    };
+
     const imageUrl = getDisplayImage();
 
     return (
         <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-            <div className="absolute top-4 left-6 z-10">
+            <div className="absolute top-4 left-6 z-10 flex gap-2">
                 <button
                     onClick={onNewScene}
                     className="flex items-center gap-2 px-3 py-1.5 bg-[var(--panel)] hover:bg-[var(--panel-contrast)] text-[var(--text)] rounded-lg text-sm font-semibold shadow-sm border border-[var(--border)] transition-all"
                 >
                     <PlusIcon className="w-4 h-4" />
                     New Scene
+                </button>
+                <button
+                    onClick={handleOpenInFinder}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-[var(--panel-contrast)] hover:bg-[var(--border)] text-[var(--text)] rounded-lg text-sm font-semibold shadow-sm border border-[var(--border)] transition-all"
+                >
+                    📂 Open in Finder
                 </button>
             </div>
 
@@ -163,6 +256,93 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
                                 </button>
                             )}
                         </div>
+
+                        {selectedStep && (
+                            <div className="pt-4 border-t border-[var(--border)] space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="text-sm font-semibold text-[var(--text)]">History</div>
+                                    <div className="text-[11px] text-[var(--text-subtle)]">
+                                        {historyLoading ? 'Loading…' : `${history.length} run${history.length === 1 ? '' : 's'}`}
+                                    </div>
+                                </div>
+                                <div className="flex gap-3 overflow-x-auto custom-scrollbar pb-1">
+                                    {history.length === 0 && (
+                                        <div className="text-[12px] text-[var(--text-subtle)]">
+                                            No history yet. Run this step to start logging.
+                                        </div>
+                                    )}
+                                    {history.map((entry) => {
+                                        const asset = findAssetForRun(entry);
+                                        const assetId = asset?.id;
+                                        const status = entry.validation?.status || (entry.error ? 'FAILED' : 'UNKNOWN');
+                                        const timestamp = entry.finished_at || entry.started_at;
+                                        return (
+                                            <div
+                                                key={entry.run_id}
+                                                className="min-w-[240px] border border-[var(--border)] rounded-lg bg-[var(--panel)] overflow-hidden shadow-sm"
+                                                style={{ width: 240 }}
+                                            >
+                                                <div
+                                                    className="aspect-video bg-[var(--panel-contrast)] cursor-pointer relative"
+                                                    onClick={() => assetId && setPreviewAssetId(assetId)}
+                                                >
+                                                    {assetId ? (
+                                                        <img
+                                                            src={api.getAssetUrl(job.id, assetId)}
+                                                            alt={entry.run_id}
+                                                            className="w-full h-full object-cover"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-full h-full flex items-center justify-center text-[var(--text-subtle)] text-xs">
+                                                            No preview
+                                                        </div>
+                                                    )}
+                                                    {assetId && selectedStep.output_asset_id === assetId && (
+                                                        <span className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-[var(--success)] border border-green-200">
+                                                            Active
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="p-2 space-y-1">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px] font-mono text-[var(--text-subtle)]">
+                                                            {formatTimestamp(timestamp)}
+                                                        </span>
+                                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                                                            status === 'SUCCESS'
+                                                                ? 'bg-green-50 text-[var(--success)] border-green-200'
+                                                                : status === 'FAILED'
+                                                                    ? 'bg-red-50 text-[var(--danger)] border-red-200'
+                                                                    : 'bg-[var(--panel-contrast)] text-[var(--text-subtle)] border-[var(--border)]'
+                                                        }`}>
+                                                            {status}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-[11px] text-[var(--text-subtle)] truncate">
+                                                        Run {entry.run_id.slice(0, 8)}
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => assetId && setPreviewAssetId(assetId)}
+                                                            className="flex-1 text-[11px] px-2 py-1 bg-[var(--panel-contrast)] hover:bg-[var(--border)] rounded border border-[var(--border)] text-[var(--text)]"
+                                                        >
+                                                            Preview
+                                                        </button>
+                                                        <button
+                                                            onClick={() => assetId && handleSetActive(assetId)}
+                                                            disabled={!assetId}
+                                                            className="flex-1 text-[11px] px-2 py-1 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white rounded border border-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            Set Active
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

@@ -213,14 +213,34 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                     <div className="flex items-start justify-between gap-2">
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-1">
-                                                <span className="text-xs font-mono text-[var(--text-subtle)]">#{index + 1}</span>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigator.clipboard.writeText(step.id);
+                                                    }}
+                                                    className="text-[10px] font-mono text-[var(--accent-strong)] hover:text-[var(--accent)] underline decoration-dotted"
+                                                    title="Copy job ID"
+                                                >
+                                                    {step.id}
+                                                </button>
                                                 <span className={`text-[10px] px-2 py-0.5 rounded-full border ${getStatusColor(step.status)}`}>
                                                     {step.status}
                                                 </span>
-                                                {step.mask_asset_id && (
-                                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--accent)] text-[var(--accent-strong)] bg-[var(--accent-soft)]">
-                                                        Mask Ready
-                                                    </span>
+                                                {canMask && (
+                                                    <button
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation();
+                                                            // Mask can be cleared inside the popup; keep toggle as an "open/edit mask" action
+                                                            onOpenMask(step.id);
+                                                        }}
+                                                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${step.mask_mode === 'MANUAL' && step.mask_asset_id
+                                                            ? 'border-green-300 bg-green-50 text-green-700'
+                                                            : 'border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text-subtle)] hover:border-[var(--border-strong)]'
+                                                            }`}
+                                                        title={step.mask_mode === 'MANUAL' && step.mask_asset_id ? 'Mask applied (click to edit/replace)' : 'Add mask'}
+                                                    >
+                                                        {step.mask_mode === 'MANUAL' && step.mask_asset_id ? 'Mask On' : 'Mask Off'}
+                                                    </button>
                                                 )}
                                             </div>
                                             <div className="text-sm font-medium text-[var(--text)] truncate">

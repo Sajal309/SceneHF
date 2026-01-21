@@ -10,10 +10,16 @@ A local application for AI-powered image layer extraction and plate creation wit
 - **📊 Real-time Updates**: SSE-powered live logs and status updates
 - **💾 Local Storage**: All jobs saved locally for resumption anytime
 
+### Storage (macOS)
+- Default root: `~/Pictures/SceneGen/jobs/<job_id>/`
+- Assets live under `assets/source`, `assets/generations`, `assets/masks`, `assets/derived`
+- History logs per run: `history/<timestamp>_<step>_<run>.json`
+- Override location with `STORAGE_ROOT`; open a job folder via `POST /api/jobs/{job_id}/open-in-finder` or the **Open in Finder** button in the UI.
+
 ## Architecture
 
 ### Backend (FastAPI)
-- **Storage**: Local filesystem (`./data/jobs/<job_id>/`)
+- **Storage**: Local filesystem (`~/Pictures/SceneGen/jobs/<job_id>/` by default)
 - **AI Services**:
   - Planner: Gemini or OpenAI for dynamic step generation
   - Vertex AI: Image editing (extraction & removal)

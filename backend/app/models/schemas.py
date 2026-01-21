@@ -38,6 +38,7 @@ class AssetKind(str, Enum):
     MASK = "MASK"
     BG_REMOVED = "BG_REMOVED"
     DEBUG = "DEBUG"
+    GENERATION = "GENERATION"
 
 
 class Asset(BaseModel):
@@ -46,6 +47,10 @@ class Asset(BaseModel):
     path: str
     width: Optional[int] = None
     height: Optional[int] = None
+    step_id: Optional[str] = None
+    run_id: Optional[str] = None
+    model: Optional[str] = None
+    prompt_hash: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -94,6 +99,9 @@ class Step(BaseModel):
     validation: Optional[ValidationResult] = None
     actions_available: List[StepAction] = Field(default_factory=list)
     logs: List[str] = Field(default_factory=list)
+    outputs_history: List[str] = Field(default_factory=list)
+    last_run_id: Optional[str] = None
+    last_prompt_used: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -123,6 +131,7 @@ class Job(BaseModel):
     steps: List[Step] = Field(default_factory=list)
     assets: Dict[str, Asset] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    storage_root: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

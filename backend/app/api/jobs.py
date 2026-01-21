@@ -2,10 +2,11 @@ import uuid
 import asyncio
 import shutil
 import zipfile
+import subprocess
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Header
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Header, Body
 from fastapi.responses import FileResponse
 
 from app.models.schemas import (
@@ -130,7 +131,15 @@ async def upload_mask(job_id: str, file: UploadFile = File(...)):
         width, height = mask.size
         mask.save(processed_path)
 
-        asset = storage.save_asset(job_id, str(processed_path), AssetKind.MASK, job=job)
+        run_id = storage.new_run_id()
+        asset = storage.save_asset(
+            job_id,
+            str(processed_path),
+            AssetKind.MASK,
+            job=job,
+            step_id="mask_upload",
+            run_id=run_id,
+        )
         pubsub.emit_log(job_id, f"Mask uploaded: {asset.id}")
 
         return {"asset_id": asset.id, "width": width, "height": height}
@@ -616,18 +625,34 @@ async def bg_remove_step(
             if not input_path:
                 raise ValueError("Output asset not found")
             
-            output_path = await asyncio.to_thread(
+            run_id = storage.new_run_id()
+            tmp_path = await asyncio.to_thread(
                 fal_service.remove_bg,
                 str(input_path),
-                output_dir=str(storage._assets_dir(job_id))
+                output_dir=str(storage._assets_subdir(job_id, "derived"))
             )
-            
-            # Save new asset
-            asset = storage.save_asset(job_id, output_path, AssetKind.BG_REMOVED)
-            
-            # Update step output
+            from PIL import Image
+            with Image.open(tmp_path) as img:
+                output_img = img.copy()
+            asset = storage.save_image(
+                job_id=job_id,
+                step_id=step_id,
+                run_id=run_id,
+                kind="bg_removed",
+                pil_image=output_img,
+                asset_kind=AssetKind.BG_REMOVED,
+                job=job,
+                subdir="derived"
+            )
             step.output_asset_id = asset.id
+            step.outputs_history.append(asset.id)
+            step.last_run_id = run_id
+            step.last_prompt_used = step.custom_prompt or step.prompt
             storage.save_job(job)
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
             
             pubsub.emit_log(job_id, "Background removal completed")
             pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
@@ -662,6 +687,8 @@ async def plate_and_retry(
         pubsub.emit_log(job_id, f"Creating plate for: {step.name}")
         
         try:
+            run_id_plate = storage.new_run_id()
+            run_id_retry = storage.new_run_id()
             # Get input
             if step.input_asset_id:
                 input_path = storage.get_asset_path(job_id, step.input_asset_id)
@@ -707,8 +734,18 @@ async def plate_and_retry(
                     request.remove_prompt,
                     plate_target
                 )
-            
-            plate_asset = storage.save_asset(job_id, plate_path, AssetKind.PLATE)
+            from PIL import Image
+            with Image.open(plate_path) as img:
+                plate_img = img.copy()
+            plate_asset = storage.save_image(
+                job_id=job_id,
+                step_id=step_id,
+                run_id=run_id_plate,
+                kind="plate",
+                pil_image=plate_img,
+                asset_kind=AssetKind.PLATE,
+                job=job
+            )
             pubsub.emit_log(job_id, f"Plate created: {plate_asset.id}")
             
             # Step 2: Retry extraction using plate as input
@@ -730,11 +767,23 @@ async def plate_and_retry(
                     request.retry_prompt,
                     extract_target
                 )
-            
-            output_asset = storage.save_asset(job_id, output_path, AssetKind.LAYER)
+            with Image.open(output_path) as img:
+                retry_img = img.copy()
+            output_asset = storage.save_image(
+                job_id=job_id,
+                step_id=step_id,
+                run_id=run_id_retry,
+                kind="plate_retry",
+                pil_image=retry_img,
+                asset_kind=AssetKind.LAYER,
+                job=job
+            )
             
             # Update step
             step.output_asset_id = output_asset.id
+            step.outputs_history.append(output_asset.id)
+            step.last_run_id = run_id_retry
+            step.last_prompt_used = request.retry_prompt
             step.custom_prompt = f"[Plate+Retry] {request.retry_prompt} ({used_service})"
             storage.save_job(job)
             
@@ -777,6 +826,7 @@ async def replace_step_image(
     try:
         with open(temp_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
+        run_id = storage.new_run_id()
 
         if target == "output":
             if step.type == StepType.EXTRACT:
@@ -788,13 +838,23 @@ async def replace_step_image(
         else:
             asset_kind = AssetKind.SOURCE
 
-        asset = storage.save_asset(job_id, str(temp_path), asset_kind, job=job)
+        asset = storage.save_asset(
+            job_id,
+            str(temp_path),
+            asset_kind,
+            job=job,
+            step_id=step_id,
+            run_id=run_id
+        )
 
         if target == "output":
             step.output_asset_id = asset.id
             step.validation = None
             if step.status in (StepStatus.FAILED, StepStatus.CANCELLED):
                 step.status = StepStatus.NEEDS_REVIEW
+            step.outputs_history.append(asset.id)
+            step.last_run_id = run_id
+            step.last_prompt_used = step.custom_prompt or step.prompt
         else:
             step.input_asset_id = asset.id
             step.output_asset_id = None
@@ -878,9 +938,17 @@ async def pause_all_jobs():
             job = storage.load_job(jid)
             if job and job.status == JobStatus.RUNNING:
                 job.status = JobStatus.PAUSED
+                changed_steps = False
+                for step in job.steps:
+                    if step.status in (StepStatus.RUNNING, StepStatus.QUEUED):
+                        step.status = StepStatus.CANCELLED
+                        changed_steps = True
+                        pubsub.emit_step_updated(jid, step.model_dump(mode='json'))
                 storage.save_job(job)
                 pubsub.emit_log(jid, "Job paused by 'Pause All' request.", level="warning")
                 pubsub.emit_job_updated(jid, job.model_dump(mode='json'))
+                if changed_steps:
+                    pubsub.emit_log(jid, "All running/queued steps marked as CANCELLED.", level="warning")
                 count += 1
         
         return {"message": f"Paused {count} running jobs"}
@@ -906,6 +974,65 @@ async def get_asset(job_id: str, asset_id: str):
     return FileResponse(asset_path)
 
 
+@router.post("/jobs/{job_id}/open-in-finder")
+async def open_in_finder(job_id: str):
+    """
+    Convenience endpoint: open job folder in macOS Finder.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job_dir = storage._job_dir(job_id)
+    legacy_dir = storage.legacy_jobs_root / job_id
+    if not job_dir.exists() and legacy_dir.exists():
+        job_dir = legacy_dir
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Job folder not found on disk")
+    try:
+        subprocess.run(["open", str(job_dir)], check=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "path": str(job_dir)}
+
+
+@router.get("/jobs/{job_id}/steps/{step_id}/history")
+async def get_step_history(job_id: str, step_id: str):
+    """
+    Return generation history records for a step.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    records = storage.read_history(job_id, step_id)
+    return {"history": records}
+
+
+@router.post("/jobs/{job_id}/steps/{step_id}/set-active")
+async def set_active_output(job_id: str, step_id: str, payload: dict = Body(...)):
+    """
+    Set which asset ID should be the active output for a step.
+    """
+    asset_id = payload.get("asset_id")
+    if not asset_id:
+        raise HTTPException(status_code=400, detail="asset_id is required")
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    step = next((s for s in job.steps if s.id == step_id), None)
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    if asset_id not in job.assets:
+        raise HTTPException(status_code=404, detail="Asset not found in job")
+    step.output_asset_id = asset_id
+    if asset_id not in step.outputs_history:
+        step.outputs_history.append(asset_id)
+    asset_meta = job.assets.get(asset_id)
+    step.last_run_id = asset_meta.run_id if asset_meta else step.last_run_id
+    storage.save_job(job)
+    pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
+    return {"ok": True, "asset_id": asset_id}
+
+
 @router.get("/jobs/{job_id}/export")
 async def export_job(job_id: str):
     """
@@ -929,8 +1056,8 @@ async def export_job(job_id: str):
         
         # Add all assets
         for asset_id, asset in job.assets.items():
-            asset_path = Path(asset.path)
-            if asset_path.exists():
+            asset_path = storage.get_asset_path(job_id, asset_id)
+            if asset_path and asset_path.exists():
                 zf.write(asset_path, f"assets/{asset_path.name}")
     
     return FileResponse(

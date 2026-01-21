@@ -32,7 +32,8 @@ export enum AssetKind {
     LAYER = 'LAYER',
     MASK = 'MASK',
     BG_REMOVED = 'BG_REMOVED',
-    DEBUG = 'DEBUG'
+    DEBUG = 'DEBUG',
+    GENERATION = 'GENERATION'
 }
 
 export interface Asset {
@@ -42,6 +43,10 @@ export interface Asset {
     width?: number;
     height?: number;
     created_at: string;
+    step_id?: string;
+    run_id?: string;
+    model?: string;
+    prompt_hash?: string;
 }
 
 export interface ValidationResult {
@@ -70,6 +75,9 @@ export interface Step {
     validation?: ValidationResult;
     actions_available: string[];
     logs: string[];
+    outputs_history: string[];
+    last_run_id?: string;
+    last_prompt_used?: string;
     created_at: string;
     updated_at: string;
 }
@@ -99,8 +107,35 @@ export interface Job {
     steps: Step[];
     assets: Record<string, Asset>;
     metadata?: Record<string, any>;
+    storage_root?: string;
     created_at: string;
     updated_at: string;
+}
+
+export interface StepHistoryEntry {
+    job_id: string;
+    step_id: string;
+    run_id: string;
+    started_at?: string;
+    finished_at?: string;
+    model?: string;
+    prompt_full?: string;
+    prompt_base?: string;
+    prompt_custom?: string | null;
+    input_asset_path?: string;
+    output_asset_id?: string;
+    mask?: {
+        mask_mode?: string;
+        mask_asset_path?: string | null;
+        mask_intent?: string | null;
+    };
+    output_asset_path?: string | null;
+    validation?: {
+        status?: string;
+        metrics?: Record<string, number>;
+        notes?: string;
+    };
+    error?: string | null;
 }
 
 // API Client
@@ -379,5 +414,29 @@ export const api = {
 
     getExportUrl(jobId: string): string {
         return `${API_BASE}/jobs/${jobId}/export`;
+    },
+
+    async openInFinder(jobId: string): Promise<{ ok: boolean; path: string }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/open-in-finder`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to open in Finder');
+        return res.json();
+    },
+
+    async getStepHistory(jobId: string, stepId: string): Promise<{ history: StepHistoryEntry[] }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/history`);
+        if (!res.ok) throw new Error('Failed to load step history');
+        return res.json();
+    },
+
+    async setActiveOutput(jobId: string, stepId: string, assetId: string): Promise<{ ok: boolean }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/steps/${stepId}/set-active`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_id: assetId })
+        });
+        if (!res.ok) throw new Error('Failed to set active output');
+        return res.json();
     }
 };
