@@ -19,6 +19,7 @@ class StepType(str, Enum):
     REMOVE = "REMOVE"
     BG_REMOVE = "BG_REMOVE"
     REFRAME = "REFRAME"
+    EDIT = "EDIT"
 
 
 class StepStatus(str, Enum):
@@ -177,3 +178,8 @@ class StepPatchRequest(BaseModel):
 class ReframeRequest(BaseModel):
     image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
     prompt: Optional[str] = None
+
+
+class EditRequest(BaseModel):
+    image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    prompt: str

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Job as JobType, Step, api, StepHistoryEntry, Asset } from '../../lib/api';
 import { PlayIcon, ReloadIcon, UpdateIcon, Cross2Icon, PlusIcon } from '@radix-ui/react-icons';
+import { ImageWithAspectBadge } from '../common/ImageWithAspectBadge';
 
 interface SceneEditorProps {
     job: JobType;
@@ -154,10 +155,28 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
                     <div className="w-full h-[420px] lg:h-[520px] rounded-xl overflow-hidden flex items-center justify-center relative group border border-[var(--border)] bg-[var(--panel-contrast)]">
                         {imageUrl ? (
                             <>
-                                <img
+                                <ImageWithAspectBadge
                                     src={imageUrl}
                                     alt="Scene"
                                     className="w-full h-full object-contain"
+                                    wrapperClassName="w-full h-full"
+                                    draggable
+                                    onDragStart={(e) => {
+                                        const assetId = previewAssetId
+                                            || selectedStep?.output_asset_id
+                                            || selectedStep?.input_asset_id
+                                            || job.source_image;
+                                        if (!assetId) return;
+                                        e.dataTransfer.setData(
+                                            'application/x-scenehf-asset',
+                                            JSON.stringify({
+                                                jobId: job.id,
+                                                assetId,
+                                                filename: `scene_${job.id.slice(0, 8)}.png`
+                                            })
+                                        );
+                                        e.dataTransfer.effectAllowed = 'copy';
+                                    }}
                                 />
 
                                 {/* Clear Scene Button */}
@@ -287,10 +306,11 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
                                                     onClick={() => assetId && setPreviewAssetId(assetId)}
                                                 >
                                                     {assetId ? (
-                                                        <img
+                                                        <ImageWithAspectBadge
                                                             src={api.getAssetUrl(job.id, assetId)}
                                                             alt={entry.run_id}
                                                             className="w-full h-full object-cover"
+                                                            wrapperClassName="w-full h-full"
                                                         />
                                                     ) : (
                                                         <div className="w-full h-full flex items-center justify-center text-[var(--text-subtle)] text-xs">

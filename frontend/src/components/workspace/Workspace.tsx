@@ -11,10 +11,12 @@ import { useJobSSE } from '../../lib/sse';
 
 interface WorkspaceProps {
     jobId: string | null;
-    onJobCreated: (jobId: string) => void;
+    onJobCreated: (jobId: string | null) => void;
+    prefillImage?: File | null;
+    onPrefillImageUsed?: () => void;
 }
 
-export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
+export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUsed }: WorkspaceProps) {
     const { settings } = useSettings();
     const [job, setJob] = useState<Job | null>(null);
     const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -197,7 +199,7 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
         if (confirm('Are you sure you want to clear this scene? This will return you to the upload screen.')) {
             setJob(null);
             setSelectedStepId(null);
-            onJobCreated(null as any); // Clear the job ID in parent
+            onJobCreated(null); // Clear the job ID in parent
         }
     };
 
@@ -207,7 +209,11 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
     if (!jobId || !job) {
         return (
             <div className="h-full flex items-center justify-center bg-[var(--bg)]">
-                <UploadCard onJobCreated={onJobCreated} />
+                <UploadCard
+                    onJobCreated={onJobCreated}
+                    initialFile={prefillImage}
+                    onInitialFileUsed={onPrefillImageUsed}
+                />
             </div>
         );
     }
@@ -225,7 +231,7 @@ export function Workspace({ jobId, onJobCreated }: WorkspaceProps) {
                         onRerunStep={handleRerunStep}
                         onBgRemove={handleBgRemove}
                         onClearScene={handleClearScene}
-                        onNewScene={() => onJobCreated(null as any)}
+                        onNewScene={() => onJobCreated(null)}
                     />
 
                     <div className="h-56 border-t border-[var(--border)]">

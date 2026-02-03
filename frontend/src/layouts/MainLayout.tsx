@@ -5,10 +5,11 @@ import { SettingsProvider } from '../context/SettingsContext';
 
 interface MainLayoutProps {
     children: React.ReactNode;
-    onLoadJob: (jobId: string) => void;
+    onLoadJob: (jobId: string | null) => void;
+    onPlanWithImage: (file: File) => void;
 }
 
-export function MainLayout({ children, onLoadJob }: MainLayoutProps) {
+export function MainLayout({ children, onLoadJob, onPlanWithImage }: MainLayoutProps) {
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
     // Restore last job on mount
@@ -19,9 +20,15 @@ export function MainLayout({ children, onLoadJob }: MainLayoutProps) {
         }
     }, []);
 
-    const handleLoadJob = (jobId: string) => {
+    const handleLoadJob = (jobId: string | null) => {
         setCurrentJobId(jobId);
         onLoadJob(jobId);
+    };
+
+    const handlePlanWithImage = (file: File) => {
+        setCurrentJobId(null);
+        onLoadJob(null);
+        onPlanWithImage(file);
     };
 
     return (
@@ -36,7 +43,11 @@ export function MainLayout({ children, onLoadJob }: MainLayoutProps) {
                 </main>
 
                 {/* Right Sidebar - History */}
-                <HistoryPanel currentJobId={currentJobId} onLoadJob={handleLoadJob} />
+                <HistoryPanel
+                    currentJobId={currentJobId}
+                    onLoadJob={handleLoadJob}
+                    onGeneratePlanFromReframe={handlePlanWithImage}
+                />
             </div>
         </SettingsProvider>
     );

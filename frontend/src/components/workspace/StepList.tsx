@@ -2,6 +2,7 @@ import { Job as JobType, Step, StepStatus, StepType, api } from '../../lib/api';
 import { ReloadIcon, DownloadIcon, Cross2Icon, CheckIcon, MagicWandIcon, UpdateIcon } from '@radix-ui/react-icons';
 import { useSettings, getApiHeaders } from '../../context/SettingsContext';
 import { useState, type DragEvent } from 'react';
+import { ImageWithAspectBadge } from '../common/ImageWithAspectBadge';
 
 interface StepListProps {
     job: JobType;
@@ -95,15 +96,32 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
         e.stopPropagation();
         setDragOverStepId(null);
 
-        const file = e.dataTransfer.files && e.dataTransfer.files[0];
-        if (!file) return;
-        if (!file.type.startsWith('image/')) {
-            console.error('Only image files can be dropped');
-            return;
-        }
-
         setUploadingStepId(step.id);
         try {
+            const raw = e.dataTransfer.getData('application/x-scenehf-asset');
+            if (raw) {
+                try {
+                    const { jobId, assetId, filename } = JSON.parse(raw) as { jobId: string; assetId: string; filename?: string };
+                    const assetUrl = api.getAssetUrl(jobId, assetId);
+                    const response = await fetch(assetUrl);
+                    if (!response.ok) throw new Error('Failed to load dragged image');
+                    const blob = await response.blob();
+                    const extension = blob.type.split('/')[1] || 'png';
+                    const name = filename || `${assetId}.${extension}`;
+                    const draggedFile = new File([blob], name, { type: blob.type || 'image/png' });
+                    await api.replaceStepImage(job.id, step.id, draggedFile, 'output');
+                    return;
+                } catch (err) {
+                    console.error('Failed to load dragged asset:', err);
+                }
+            }
+
+            const file = e.dataTransfer.files && e.dataTransfer.files[0];
+            if (!file) return;
+            if (!file.type.startsWith('image/')) {
+                console.error('Only image files can be dropped');
+                return;
+            }
             await api.replaceStepImage(job.id, step.id, file, 'output');
         } catch (error) {
             console.error('Failed to replace step image:', error);
@@ -152,7 +170,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                         const isDragOver = dragOverStepId === step.id;
                         const isUploading = uploadingStepId === step.id;
                         const requiresMask = step.mask_mode === 'MANUAL' && !step.mask_asset_id;
-                        const canMask = step.type === StepType.EXTRACT || step.type === StepType.REMOVE;
+                        const canMask = step.type === StepType.EXTRACT || step.type === StepType.REMOVE || step.type === StepType.EDIT;
 
                         return (
                             <div
@@ -180,7 +198,27 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                 <div className="aspect-video w-full bg-[var(--panel-contrast)] overflow-hidden relative">
                                     {imageUrl ? (
                                         <>
-                                            <img src={imageUrl} alt={step.name} className="w-full h-full object-cover" />
+                                            <ImageWithAspectBadge
+                                                src={imageUrl}
+                                                alt={step.name}
+                                                className="w-full h-full object-cover"
+                                                wrapperClassName="w-full h-full"
+                                                draggable
+                                                onDragStart={(e) => {
+                                                    if (!step.output_asset_id && !step.input_asset_id) return;
+                                                    const assetId = step.output_asset_id || step.input_asset_id;
+                                                    if (!assetId) return;
+                                                    e.dataTransfer.setData(
+                                                        'application/x-scenehf-asset',
+                                                        JSON.stringify({
+                                                            jobId: job.id,
+                                                            assetId,
+                                                            filename: `${step.name.replace(/\s+/g, '_').toLowerCase()}.png`
+                                                        })
+                                                    );
+                                                    e.dataTransfer.effectAllowed = 'copy';
+                                                }}
+                                            />
                                             {step.mask_asset_id && (
                                                 <img
                                                     src={api.getAssetUrl(job.id, step.mask_asset_id)}

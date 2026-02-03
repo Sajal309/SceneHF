@@ -23,7 +23,8 @@ export enum StepType {
     EXTRACT = 'EXTRACT',
     REMOVE = 'REMOVE',
     BG_REMOVE = 'BG_REMOVE',
-    REFRAME = 'REFRAME'
+    REFRAME = 'REFRAME',
+    EDIT = 'EDIT'
 }
 
 export enum AssetKind {
@@ -236,6 +237,28 @@ export const api = {
         });
 
         if (!res.ok) throw new Error('Failed to reframe job');
+        return res.json();
+    },
+
+    async editJob(
+        jobId: string,
+        prompt: string,
+        imageConfig: Record<string, any> = {},
+        headers: Record<string, string> = {}
+    ): Promise<{ message: string; step_id: string }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/edit`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...headers
+            },
+            body: JSON.stringify({
+                prompt,
+                image_config: imageConfig
+            })
+        });
+
+        if (!res.ok) throw new Error('Failed to edit image');
         return res.json();
     },
 

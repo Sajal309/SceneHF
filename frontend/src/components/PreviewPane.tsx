@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Job as JobType, Step, api } from '../lib/api';
 import { UpdateIcon, DownloadIcon } from '@radix-ui/react-icons';
+import { ImageWithAspectBadge } from './common/ImageWithAspectBadge';
 
 interface PreviewPaneProps {
     job: JobType;
@@ -144,10 +145,11 @@ export function PreviewPane({ job, step }: PreviewPaneProps) {
             <div className="flex-1 glass-card rounded-lg overflow-hidden flex items-center justify-center relative group">
                 {imageUrl ? (
                     <>
-                        <img
+                        <ImageWithAspectBadge
                             src={imageUrl}
                             alt="Preview"
                             className={`max-w-full max-h-full object-contain transition-all duration-300 ${step?.status === 'RUNNING' ? 'opacity-30 blur-sm scale-95' : 'opacity-100'}`}
+                            wrapperClassName="max-w-full max-h-full"
                         />
                         {showMask && maskUrl && viewMode === 'input' && (
                             <img

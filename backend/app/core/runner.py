@@ -6,7 +6,7 @@ from typing import Optional
 from PIL import Image
 
 from app.models.schemas import (
-    Job, Step, StepType, StepStatus, StepAction,
+    Job, Step, StepType, StepStatus, StepAction, ValidationResult,
     JobStatus, AssetKind, MaskMode, MaskIntent
 )
 from app.core.storage import storage
@@ -153,7 +153,7 @@ class Runner:
                 except Exception:
                     pass
             
-            elif step.type in (StepType.EXTRACT, StepType.REMOVE, StepType.REFRAME):
+            elif step.type in (StepType.EXTRACT, StepType.REMOVE, StepType.REFRAME, StepType.EDIT):
                 # Check if image config specifies provider
                 image_config = step.image_config or (job.metadata.get("image_config", {}) if job.metadata else {})
                 image_provider = image_config.get("provider")
@@ -252,7 +252,7 @@ class Runner:
                             output_path,
                             config=image_config
                         )
-                    else:  # REMOVE
+                    else:  # REMOVE / EDIT / REFRAME
                         output_path = await asyncio.to_thread(
                             openai_service.remove,
                             str(input_path),
@@ -337,7 +337,12 @@ class Runner:
             
             # Save output asset for Gemini/OpenAI/Vertex paths
             if output_asset is None:
-                asset_kind = AssetKind.LAYER if step.type == StepType.EXTRACT else AssetKind.PLATE
+                if step.type == StepType.EXTRACT:
+                    asset_kind = AssetKind.LAYER
+                elif step.type == StepType.EDIT:
+                    asset_kind = AssetKind.GENERATION
+                else:
+                    asset_kind = AssetKind.PLATE
                 if step.type == StepType.BG_REMOVE:
                     asset_kind = AssetKind.BG_REMOVED
                 subdir = "generations"
@@ -408,6 +413,13 @@ class Runner:
                     str(output_path),
                     str(source_path),
                     validation_rules
+                )
+            elif step.type == StepType.EDIT:
+                validation = ValidationResult(
+                    passed=True,
+                    status=StepStatus.SUCCESS,
+                    metrics={},
+                    notes="Edit completed (no validation applied)."
                 )
             else:
                 # BG_REMOVE - basic validation

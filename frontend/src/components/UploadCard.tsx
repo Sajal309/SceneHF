@@ -1,7 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { PlusIcon, TrashIcon, LayersIcon } from '@radix-ui/react-icons';
 import { useSettings, getApiHeaders } from '../context/SettingsContext';
 import { api } from '../lib/api';
+import { ImageWithAspectBadge } from './common/ImageWithAspectBadge';
 
 interface LayerSpec {
     index: number;
@@ -9,17 +10,19 @@ interface LayerSpec {
 }
 
 interface UploadCardProps {
-    onJobCreated: (jobId: string) => void;
+    onJobCreated: (jobId: string | null) => void;
+    initialFile?: File | null;
+    onInitialFileUsed?: () => void;
 }
 
-export function UploadCard({ onJobCreated }: UploadCardProps) {
+export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: UploadCardProps) {
     const { settings } = useSettings();
     const [dragActive, setDragActive] = useState(false);
     const [preview, setPreview] = useState<string | null>(null);
     const [uploadedFile, setUploadedFile] = useState<File | null>(null);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [workflow, setWorkflow] = useState<'segmentation' | 'reframe'>('segmentation');
+    const [workflow, setWorkflow] = useState<'segmentation' | 'reframe' | 'edit'>('segmentation');
 
     // Layer planning state
     const [layerCount, setLayerCount] = useState(4);
@@ -30,6 +33,7 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
         { index: 4, name: 'Sky/distant elements' }
     ]);
     const [sceneDescription, setSceneDescription] = useState('');
+    const [editPrompt, setEditPrompt] = useState('');
 
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -47,6 +51,31 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
         e.preventDefault();
         e.stopPropagation();
         setDragActive(false);
+
+        const raw = e.dataTransfer.getData('application/x-scenehf-asset');
+        if (raw) {
+            try {
+                const { jobId, assetId, filename } = JSON.parse(raw) as { jobId: string; assetId: string; filename?: string };
+                const assetUrl = api.getAssetUrl(jobId, assetId);
+                fetch(assetUrl)
+                    .then((res) => {
+                        if (!res.ok) throw new Error('Failed to load dragged image');
+                        return res.blob();
+                    })
+                    .then((blob) => {
+                        const extension = blob.type.split('/')[1] || 'png';
+                        const name = filename || `${assetId}.${extension}`;
+                        handleFile(new File([blob], name, { type: blob.type || 'image/png' }));
+                    })
+                    .catch((err) => {
+                        console.error('Failed to load dragged asset:', err);
+                        setError('Failed to load dragged image');
+                    });
+                return;
+            } catch {
+                // ignore and fall back to file drop
+            }
+        }
 
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
             handleFile(e.dataTransfer.files[0]);
@@ -76,6 +105,14 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
         };
         reader.readAsDataURL(file);
     };
+
+    useEffect(() => {
+        if (!initialFile) return;
+        setError(null);
+        setWorkflow('segmentation');
+        handleFile(initialFile);
+        onInitialFileUsed?.();
+    }, [initialFile, onInitialFileUsed]);
 
     const handleClick = () => {
         inputRef.current?.click();
@@ -175,6 +212,32 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
         }
     };
 
+    const handleEdit = async () => {
+        if (!uploadedFile || !editPrompt.trim()) return;
+
+        setUploading(true);
+        setError(null);
+
+        try {
+            const { job_id } = await api.createJob(uploadedFile);
+            const headers = getApiHeaders(settings);
+            const imageConfig: Record<string, any> = {
+                provider: settings.imageProvider,
+                model: settings.imageModel
+            };
+            Object.entries(settings.imageParams).forEach(([key, param]) => {
+                if (param.enabled) imageConfig[key] = param.value;
+            });
+            await api.editJob(job_id, editPrompt.trim(), imageConfig, headers);
+            onJobCreated(job_id);
+        } catch (err: any) {
+            console.error('Edit failed:', err);
+            setError(err.message || 'Failed to edit image');
+        } finally {
+            setUploading(false);
+        }
+    };
+
     return (
         <div className="max-w-4xl mx-auto p-8 space-y-6">
             {/* Upload Area */}
@@ -201,7 +264,7 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
 
                 {preview ? (
                     <div className="space-y-4">
-                        <img
+                        <ImageWithAspectBadge
                             src={preview}
                             alt="Preview"
                             className="max-h-96 mx-auto rounded-lg shadow-[var(--shadow-soft)]"
@@ -238,7 +301,7 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
                     {/* Workflow Selection */}
                     <div className="glass-card rounded-xl p-6 space-y-4">
                         <div className="text-sm font-semibold text-[var(--text)]">Workflow</div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <button
                                 onClick={() => setWorkflow('reframe')}
                                 className={`text-left p-4 rounded-xl border transition-all ${workflow === 'reframe'
@@ -261,6 +324,18 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
                                 <div className="text-sm font-semibold text-[var(--text)]">Segmentation</div>
                                 <div className="text-xs text-[var(--text-subtle)] mt-1">
                                     Build a layer plan and extract scene elements.
+                                </div>
+                            </button>
+                            <button
+                                onClick={() => setWorkflow('edit')}
+                                className={`text-left p-4 rounded-xl border transition-all ${workflow === 'edit'
+                                    ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                                    : 'border-[var(--border)] bg-[var(--panel-muted)] hover:border-[var(--border-strong)]'
+                                    }`}
+                            >
+                                <div className="text-sm font-semibold text-[var(--text)]">Edit</div>
+                                <div className="text-xs text-[var(--text-subtle)] mt-1">
+                                    Upload an image and edit it with a prompt.
                                 </div>
                             </button>
                         </div>
@@ -359,6 +434,25 @@ export function UploadCard({ onJobCreated }: UploadCardProps) {
                         {uploading ? 'Generating Plan...' : '✨ Generate Layer Plan'}
                     </button>
                         </>
+                    )}
+
+                    {workflow === 'edit' && (
+                        <div className="glass-card rounded-xl p-6 space-y-4">
+                            <div className="text-sm font-semibold text-[var(--text)]">Prompted Edit</div>
+                            <textarea
+                                value={editPrompt}
+                                onChange={(e) => setEditPrompt(e.target.value)}
+                                placeholder="Describe the edit you want (e.g., 'Change the sky to a pink sunset')"
+                                className="w-full h-28 bg-[var(--panel-muted)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm text-[var(--text)] placeholder-[var(--text-subtle)] focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] outline-none resize-none"
+                            />
+                            <button
+                                onClick={handleEdit}
+                                disabled={uploading || !editPrompt.trim()}
+                                className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-white rounded-xl font-semibold text-base transition-all disabled:cursor-not-allowed shadow-[var(--shadow-card)]"
+                            >
+                                {uploading ? 'Generating...' : 'Generate Edit'}
+                            </button>
+                        </div>
                     )}
                 </div>
             )}

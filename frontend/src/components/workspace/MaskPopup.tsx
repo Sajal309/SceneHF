@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Job, Step, api } from '../../lib/api';
 import { Cross2Icon, Pencil2Icon, EraserIcon, UploadIcon } from '@radix-ui/react-icons';
+import { ImageWithAspectBadge } from '../common/ImageWithAspectBadge';
 
 interface MaskPopupProps {
     job: Job;
@@ -311,7 +312,12 @@ export function MaskPopup({ job, step, onClose }: MaskPopupProps) {
                         <div className="relative w-full flex-1 min-h-[60vh] bg-[var(--panel-contrast)] rounded-xl overflow-hidden border border-[var(--border)] flex items-center justify-center">
                             {inputUrl ? (
                                 <div className="relative">
-                                    <img src={inputUrl} alt="Input" className="block max-h-[70vh] max-w-full w-auto h-auto" />
+                                    <ImageWithAspectBadge
+                                        src={inputUrl}
+                                        alt="Input"
+                                        className="block max-h-[70vh] max-w-full w-auto h-auto"
+                                        wrapperClassName="inline-block"
+                                    />
                                     <canvas
                                         ref={canvasRef}
                                         className="absolute inset-0 w-full h-full opacity-70 z-10 cursor-crosshair touch-none"

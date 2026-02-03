@@ -10,8 +10,12 @@ export type SSECallback = (event: SSEEvent) => void;
 export class SSEClient {
     private eventSource: EventSource | null = null;
     private callbacks: SSECallback[] = [];
+    private reconnectTimer: number | null = null;
+    private activeJobId: string | null = null;
 
     connect(jobId: string) {
+        this.activeJobId = jobId;
+        this.clearReconnectTimer();
         this.disconnect();
 
         const url = `/api/jobs/${jobId}/events`;
@@ -20,19 +24,28 @@ export class SSEClient {
         // Listen for all event types
         ['job.updated', 'step.updated', 'log'].forEach(eventType => {
             this.eventSource!.addEventListener(eventType, (e: MessageEvent) => {
-                const data = JSON.parse(e.data);
-                this.emit({ type: eventType, data });
+                try {
+                    const data = JSON.parse(e.data);
+                    this.emit({ type: eventType, data });
+                } catch (err) {
+                    console.error('Failed to parse SSE payload:', err);
+                }
             });
         });
 
+        this.eventSource.onopen = () => {
+            this.clearReconnectTimer();
+        };
+
         this.eventSource.onerror = (error) => {
-            console.error('SSE error:', error);
-            // Auto-reconnect after 3 seconds
-            setTimeout(() => {
-                if (this.eventSource?.readyState === EventSource.CLOSED) {
-                    this.connect(jobId);
+            console.warn('SSE disconnected, reconnecting...', error);
+            // Force a clean reconnect because readyState checks are unreliable across browsers.
+            this.disconnect();
+            this.reconnectTimer = window.setTimeout(() => {
+                if (this.activeJobId) {
+                    this.connect(this.activeJobId);
                 }
-            }, 3000);
+            }, 1500);
         };
     }
 
@@ -40,6 +53,14 @@ export class SSEClient {
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;
+        }
+        this.clearReconnectTimer();
+    }
+
+    private clearReconnectTimer() {
+        if (this.reconnectTimer !== null) {
+            window.clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
         }
     }
 

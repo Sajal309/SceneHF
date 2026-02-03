@@ -13,7 +13,7 @@ from app.models.schemas import (
     Job, Step, StepType, StepStatus, StepAction,
     JobStatus, AssetKind, JobCreateResponse,
     PlanRequest, RetryRequest, PlateAndRetryRequest,
-    PromptVariationsRequest, StepPatchRequest, MaskMode, ReframeRequest, PlanStep, Plan
+    PromptVariationsRequest, StepPatchRequest, MaskMode, ReframeRequest, EditRequest, PlanStep, Plan
 )
 from app.core.storage import storage
 from app.core.pubsub import pubsub
@@ -478,6 +478,60 @@ async def reframe_job(
     return {"message": "Reframe started", "step_id": step_id}
 
 
+@router.post("/jobs/{job_id}/edit")
+async def edit_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    request: EditRequest,
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+):
+    """
+    Create and run a single edit step using the provided prompt.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if request.image_config is not None:
+        if not job.metadata:
+            job.metadata = {}
+        job.metadata["image_config"] = request.image_config
+        if not job.metadata.get("image_api_key"):
+            image_provider = request.image_config.get("provider")
+            if image_provider == "google" and x_google_api_key:
+                job.metadata["image_api_key"] = x_google_api_key
+            elif image_provider == "openai" and x_openai_api_key:
+                job.metadata["image_api_key"] = x_openai_api_key
+
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key):
+        storage.save_job(job)
+        pubsub.emit_log(job_id, "Updated API keys from frontend")
+
+    step_id = str(uuid.uuid4())
+    step = Step(
+        id=step_id,
+        index=len(job.steps),
+        name="Image Edit",
+        type=StepType.EDIT,
+        prompt=request.prompt,
+        status=StepStatus.QUEUED,
+        input_asset_id=job.source_image,
+        image_config=request.image_config
+    )
+    job.steps.append(step)
+    job.status = JobStatus.RUNNING
+    storage.save_job(job)
+
+    pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
+    pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
+
+    background_tasks.add_task(runner.run_step, job_id, step_id)
+
+    return {"message": "Edit started", "step_id": step_id}
+
+
 @router.post("/jobs/{job_id}/steps/{step_id}/run")
 async def run_step(
     job_id: str, 
@@ -502,6 +556,13 @@ async def run_step(
     step = next((s for s in job.steps if s.id == step_id), None)
     if not step:
         raise HTTPException(status_code=404, detail="Step not found")
+
+    # Explicit user-run should resume a paused job.
+    if job.status == JobStatus.PAUSED:
+        job.status = JobStatus.RUNNING
+        storage.save_job(job)
+        pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
+        pubsub.emit_log(job_id, "Job resumed for manual step run.")
     
     # Run in background
     background_tasks.add_task(runner.run_step, job_id, step_id)
@@ -580,9 +641,13 @@ async def retry_step(
     if request.image_config:
         step.image_config = request.image_config
     step.status = StepStatus.QUEUED
+    if job.status == JobStatus.PAUSED:
+        job.status = JobStatus.RUNNING
     storage.save_job(job)
     
     pubsub.emit_log(job_id, f"Retrying step: {step.name}")
+    if job.status == JobStatus.RUNNING:
+        pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
     pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
     
     # Run in background
@@ -833,6 +898,8 @@ async def replace_step_image(
                 asset_kind = AssetKind.LAYER
             elif step.type == StepType.REMOVE:
                 asset_kind = AssetKind.PLATE
+            elif step.type == StepType.EDIT:
+                asset_kind = AssetKind.GENERATION
             else:
                 asset_kind = AssetKind.BG_REMOVED
         else:
