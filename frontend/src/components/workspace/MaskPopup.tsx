@@ -10,10 +10,11 @@ interface MaskPopupProps {
 }
 
 type Tool = 'brush' | 'eraser';
+type MaskIntent = 'INPAINT_REMOVE' | 'INPAINT_INSERT' | 'EXTRACT_HELPER';
 
 export function MaskPopup({ job, step, onClose }: MaskPopupProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const [maskIntent, setMaskIntent] = useState(step.mask_intent || 'INPAINT_REMOVE');
+    const [maskIntent, setMaskIntent] = useState<MaskIntent>((step.mask_intent as MaskIntent) || 'INPAINT_REMOVE');
     const [tool, setTool] = useState<Tool>('brush');
     const [brushSize, setBrushSize] = useState(32);
     const [isDrawing, setIsDrawing] = useState(false);
@@ -28,7 +29,7 @@ export function MaskPopup({ job, step, onClose }: MaskPopupProps) {
     const maskUrl = step.mask_asset_id ? api.getAssetUrl(job.id, step.mask_asset_id) : null;
 
     useEffect(() => {
-        setMaskIntent(step.mask_intent || 'INPAINT_REMOVE');
+        setMaskIntent((step.mask_intent as MaskIntent) || 'INPAINT_REMOVE');
         setMaskPrompt(step.mask_prompt || '');
         setMaskStatus(step.mask_asset_id ? 'saved' : 'idle');
     }, [step.mask_intent, step.mask_prompt, step.mask_asset_id]);
@@ -159,7 +160,7 @@ export function MaskPopup({ job, step, onClose }: MaskPopupProps) {
         }
     };
 
-    const handleIntentChange = async (intent: string) => {
+    const handleIntentChange = async (intent: MaskIntent) => {
         setMaskIntent(intent);
         try {
             await api.patchStep(job.id, step.id, {
@@ -215,7 +216,7 @@ export function MaskPopup({ job, step, onClose }: MaskPopupProps) {
                             <div className="text-[10px] uppercase font-bold text-[var(--text-subtle)]">Mask Intent</div>
                             <select
                                 value={maskIntent || 'INPAINT_REMOVE'}
-                                onChange={(e) => handleIntentChange(e.target.value)}
+                                onChange={(e) => handleIntentChange(e.target.value as MaskIntent)}
                                 className="w-full bg-[var(--panel-contrast)] border border-[var(--border)] rounded-md px-2 py-1.5 text-xs text-[var(--text)]"
                             >
                                 <option value="INPAINT_REMOVE">Inpaint Remove</option>

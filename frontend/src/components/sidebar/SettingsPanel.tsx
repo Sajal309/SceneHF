@@ -244,6 +244,36 @@ export function SettingsPanel() {
                     </div>
                 </CollapsibleSection>
 
+                {/* Fal Background Removal Configuration */}
+                <CollapsibleSection title="Fal AI Model" icon={<ImageIcon className="w-4 h-4 text-emerald-400" />}>
+                    <div className="space-y-3 mt-3">
+                        <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Provider</label>
+                            <input
+                                type="text"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm text-[var(--text-subtle)] outline-none"
+                                value="Fal AI"
+                                readOnly
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Model</label>
+                            <input
+                                type="text"
+                                list="fal-model-options"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none"
+                                value={settings.falModel}
+                                onChange={(e) => updateSettings({ falModel: e.target.value })}
+                                placeholder="e.g. fal-ai/imageutils/rembg"
+                            />
+                            <datalist id="fal-model-options">
+                                <option value="fal-ai/imageutils/rembg" />
+                            </datalist>
+                        </div>
+                    </div>
+                </CollapsibleSection>
+
                 {/* API Keys */}
                 <CollapsibleSection title="API Credentials" icon={<PersonIcon className="w-4 h-4 text-[var(--accent)]" />}>
                     <div className="space-y-3 mt-3">
@@ -268,6 +298,17 @@ export function SettingsPanel() {
                                 value={settings.imageApiKey}
                                 onChange={(e) => updateSettings({ imageApiKey: e.target.value })}
                                 placeholder="sk-..."
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Fal AI API Key</label>
+                            <input
+                                type="password"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
+                                value={settings.falApiKey}
+                                onChange={(e) => updateSettings({ falApiKey: e.target.value })}
+                                placeholder="fal_..."
                             />
                         </div>
                     </div>

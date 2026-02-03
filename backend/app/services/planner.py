@@ -35,13 +35,15 @@ CRITICAL RULES (must be in every plan):
 2. No new objects, people, animals, text, or logos
 3. All extraction outputs MUST have solid white (#FFFFFF) background
 4. Process layers from foreground to background
-5. Follow the user's layer specifications exactly
+5. If user layer specifications are provided, follow them exactly; otherwise decide the optimal layer count and layer names automatically
 6. Generate clean plates (removing the extracted layer) ONLY when extremely necessary (e.g., when the object is large or leaves a complex hole). Do NOT generate a clean plate for every single layer if it's not needed.
 7. If a clean plate IS generated, it MUST have a solid WHITE background. Do NOT generate transparent or checkered backgrounds.
 8. If a scene description is provided, the plan MUST follow it. Do not contradict it or invent elements not described.
+9. When user layer specs are NOT provided, choose 2-10 extraction layers that best represent the scene and keep the plan practical.
+10. Think like an execution agent: assess complexity, identify likely challenges, and recommend what should happen next.
 
 For each step, specify:
-- Clear target description matching user's layer map
+- Clear target description (matching user's layer map when provided)
 - Precise extraction/removal prompt
 - 3-5 prompt variations that preserve the same objective
 - Validation thresholds (min_nonwhite, max_nonwhite for extractions; min_nonwhite for plates)
@@ -50,6 +52,18 @@ For each step, specify:
 Return ONLY valid JSON matching this schema:
 {{
   "scene_summary": "brief description of the scene (based on the user's description when provided)",
+  "agentic_analysis": {{
+    "mode": "AUTO or MANUAL",
+    "scene_complexity": "LOW | MEDIUM | HIGH",
+    "estimated_layer_count": 4,
+    "risk_level": "LOW | MEDIUM | HIGH",
+    "decision_rationale": "short rationale for why this layer strategy is chosen",
+    "potential_challenges": ["challenge 1", "challenge 2"],
+    "recommended_next_actions": [
+      {{"action": "RUN_PLAN", "reason": "why this should be done now"}},
+      {{"action": "REVIEW_STEP_PROMPTS", "reason": "optional preflight review reason"}}
+    ]
+  }},
   "global_rules": ["rule 1", "rule 2", ...],
   "steps": [
     {{
@@ -145,6 +159,13 @@ class Planner:
                 layer_instructions += f"  {layer['index']}. {layer['name']}\n"
             layer_instructions += "\nGenerate extraction steps that match these layer names and ordering.\n"
             # layer_instructions += "After each extraction, create a plate by removing that layer.\n" # REMOVED: Only generate plate if necessary
+        else:
+            layer_instructions += (
+                "AUTO LAYERING MODE:\n"
+                "Determine how many extraction layers are needed for this scene (between 2 and 10), "
+                "name them clearly from foreground to background, and generate strong prompts for each.\n"
+                "Include a strong agentic_analysis block with challenges and recommended next actions.\n"
+            )
         
         if use_provider == "openai":
             return self._generate_plan_openai(image_path, config, api_key, layer_instructions)
@@ -436,7 +457,8 @@ Do NOT include any preamble or markdown blocks.
         return Plan(
             scene_summary=plan_json.get("scene_summary", ""),
             global_rules=plan_json.get("global_rules", []),
-            steps=steps
+            steps=steps,
+            agentic_analysis=plan_json.get("agentic_analysis")
         )
 
 

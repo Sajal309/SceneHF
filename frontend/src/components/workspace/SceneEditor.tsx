@@ -130,6 +130,7 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
     };
 
     const imageUrl = getDisplayImage();
+    const agentic = job.plan?.agentic_analysis;
 
     return (
         <div className="flex-1 flex flex-col h-full overflow-hidden relative">
@@ -194,11 +195,11 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
                                         <div className="text-sm font-semibold text-[var(--text)]">{selectedStep.name}</div>
                                     </div>
                                 )}
-                                {selectedStep && (selectedStep.status === 'RUNNING' || selectedStep.status === 'QUEUED') && (
+                                {selectedStep && selectedStep.status === 'RUNNING' && (
                                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/70 backdrop-blur-sm">
                                         <div className="w-12 h-12 border-4 border-[var(--accent-soft)] border-t-[var(--accent)] rounded-full animate-spin" />
                                         <div className="text-sm font-semibold text-[var(--text)] tracking-widest uppercase">
-                                            {selectedStep.status === 'RUNNING' ? 'Generating...' : 'Queued...'}
+                                            Generating...
                                         </div>
                                     </div>
                                 )}
@@ -213,6 +214,33 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
 
                     {/* Prompt Editor */}
                     <div className="space-y-3">
+                        {!selectedStep && agentic && (
+                            <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="text-sm font-semibold text-[var(--text)]">Agent Plan Assessment</div>
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text-subtle)]">
+                                        {agentic.mode || 'AUTO'} • {agentic.scene_complexity || '—'}
+                                    </span>
+                                </div>
+                                <div className="text-xs text-[var(--text-subtle)]">
+                                    Estimated layers: <span className="text-[var(--text)] font-medium">{agentic.estimated_layer_count ?? job.steps.length}</span>
+                                    {' '}• Risk: <span className="text-[var(--text)] font-medium">{agentic.risk_level || '—'}</span>
+                                </div>
+                                {agentic.decision_rationale && (
+                                    <div className="text-xs text-[var(--text-subtle)]">{agentic.decision_rationale}</div>
+                                )}
+                                {!!agentic.potential_challenges?.length && (
+                                    <div className="text-xs text-[var(--text-subtle)]">
+                                        Challenges: {agentic.potential_challenges.slice(0, 3).join(' • ')}
+                                    </div>
+                                )}
+                                {!!agentic.recommended_next_actions?.length && (
+                                    <div className="text-xs text-[var(--text-subtle)]">
+                                        Next: {agentic.recommended_next_actions[0].action} — {agentic.recommended_next_actions[0].reason}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                         <div className="flex items-center justify-between">
                             <label className="text-sm font-semibold text-[var(--text)]">
                                 {selectedStep ? `Prompt for ${selectedStep.name}` : 'Scene Description'}

@@ -1,5 +1,5 @@
 import { Job as JobType, Step, StepStatus, StepType, api } from '../../lib/api';
-import { ReloadIcon, DownloadIcon, Cross2Icon, CheckIcon, MagicWandIcon, UpdateIcon } from '@radix-ui/react-icons';
+import { ReloadIcon, DownloadIcon, Cross2Icon, MagicWandIcon, UpdateIcon } from '@radix-ui/react-icons';
 import { useSettings, getApiHeaders } from '../../context/SettingsContext';
 import { useState, type DragEvent } from 'react';
 import { ImageWithAspectBadge } from '../common/ImageWithAspectBadge';
@@ -26,10 +26,10 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                 return 'bg-green-100 text-[var(--success)] border-green-200';
             case StepStatus.RUNNING:
                 return 'bg-blue-100 text-[var(--accent-strong)] border-blue-200';
+            case StepStatus.QUEUED:
+                return 'bg-amber-50 text-amber-700 border-amber-200';
             case StepStatus.FAILED:
                 return 'bg-red-100 text-[var(--danger)] border-red-200';
-            case StepStatus.QUEUED:
-                return 'bg-[var(--panel-contrast)] text-[var(--text-subtle)] border-[var(--border)]';
             case StepStatus.CANCELLED:
                 return 'bg-[var(--panel-contrast)] text-[var(--text-subtle)] border-[var(--border)]';
             default:
@@ -159,7 +159,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                         No steps yet. Generate a plan first.
                     </div>
                 ) : (
-                    job.steps.map((step, index) => {
+                    job.steps.map((step) => {
                         const isSelected = selectedStep?.id === step.id;
                         const imageUrl = step.output_asset_id
                             ? api.getAssetUrl(job.id, step.output_asset_id)
@@ -171,6 +171,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                         const isUploading = uploadingStepId === step.id;
                         const requiresMask = step.mask_mode === 'MANUAL' && !step.mask_asset_id;
                         const canMask = step.type === StepType.EXTRACT || step.type === StepType.REMOVE || step.type === StepType.EDIT;
+                        const statusLabel = step.status === StepStatus.QUEUED ? 'PAUSED' : step.status;
 
                         return (
                             <div
@@ -232,7 +233,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                             No Preview
                                         </div>
                                     )}
-                                    {(step.status === 'RUNNING' || step.status === 'QUEUED') && (
+                                    {(step.status === 'RUNNING') && (
                                         <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
                                             <div className="w-8 h-8 border-4 border-[var(--accent-soft)] border-t-[var(--accent)] rounded-full animate-spin" />
                                         </div>
@@ -262,7 +263,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                                     {step.id}
                                                 </button>
                                                 <span className={`text-[10px] px-2 py-0.5 rounded-full border ${getStatusColor(step.status)}`}>
-                                                    {step.status}
+                                                    {statusLabel}
                                                 </span>
                                                 {canMask && (
                                                     <button
@@ -292,7 +293,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
 
                                     {/* Actions */}
                                     <div className="flex items-center gap-1 pt-2 border-t border-[var(--border)]">
-                                        {(step.status === 'RUNNING' || step.status === 'QUEUED') ? (
+                                        {step.status === 'RUNNING' ? (
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -302,6 +303,21 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                             >
                                                 <Cross2Icon className="w-3 h-3" />
                                                 Stop
+                                            </button>
+                                        ) : step.status === 'QUEUED' ? (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (!requiresMask) onRerunStep(step.id);
+                                                }}
+                                                className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded transition-colors ${requiresMask
+                                                    ? 'bg-[var(--panel-contrast)] text-[var(--text-subtle)] cursor-not-allowed opacity-70'
+                                                    : 'bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white'
+                                                    }`}
+                                                title={requiresMask ? 'Attach a mask before running' : 'Start this step'}
+                                            >
+                                                <ReloadIcon className="w-3 h-3" />
+                                                Start
                                             </button>
                                         ) : (
                                             <>

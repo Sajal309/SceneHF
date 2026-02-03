@@ -64,11 +64,11 @@ export function StepTimeline({ jobId, steps, selectedStep, onSelectStep }: StepT
                                 #{index + 1}
                             </span>
                             <span className={`badge ${getStatusBadgeClass(step.status)}`}>
-                                {step.status}
+                                {step.status === StepStatus.QUEUED ? 'PAUSED' : step.status}
                             </span>
                         </div>
 
-                        {(step.status === StepStatus.RUNNING || step.status === StepStatus.QUEUED) && (
+                        {(step.status === StepStatus.RUNNING) && (
                             <button
                                 onClick={(e) => handleStop(e, step.id)}
                                 className="p-1 text-[var(--text-subtle)] hover:text-[var(--danger)] transition-colors"

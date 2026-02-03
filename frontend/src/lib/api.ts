@@ -96,6 +96,15 @@ export interface PlanStep {
 
 export interface Plan {
     scene_summary: string;
+    agentic_analysis?: {
+        mode?: string;
+        scene_complexity?: string;
+        estimated_layer_count?: number;
+        risk_level?: string;
+        decision_rationale?: string;
+        potential_challenges?: string[];
+        recommended_next_actions?: Array<{ action: string; reason: string }>;
+    };
     global_rules: string[];
     steps: PlanStep[];
 }

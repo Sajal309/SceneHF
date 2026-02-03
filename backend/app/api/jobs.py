@@ -31,7 +31,8 @@ def _update_job_keys_from_headers(
     job,
     x_google: Optional[str] = None,
     x_openai: Optional[str] = None,
-    x_image: Optional[str] = None
+    x_image: Optional[str] = None,
+    x_fal: Optional[str] = None
 ):
     """Update job metadata keys if headers are provided."""
     if not job.metadata:
@@ -42,6 +43,10 @@ def _update_job_keys_from_headers(
     # Update image API key if explicitly provided
     if x_image and job.metadata.get("image_api_key") != x_image:
         job.metadata["image_api_key"] = x_image
+        changed = True
+
+    if x_fal and job.metadata.get("fal_api_key") != x_fal:
+        job.metadata["fal_api_key"] = x_fal
         changed = True
     
     # Fallback/Update logic: reuse google/openai keys if image key is still missing
@@ -239,7 +244,8 @@ async def plan_job(
     request: PlanRequest,
     x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
     x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
-    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
 ):
     """
     Generate a dynamic plan for the job using AI.
@@ -253,6 +259,8 @@ async def plan_job(
     
     pubsub.emit_log(job_id, "Generating plan...")
     print(f"DEBUG: plan_job request: {request.dict()}")
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key):
+        storage.save_job(job)
     
     # Get source image path
     source_path = storage.get_asset_path(job_id, job.source_image)
@@ -306,7 +314,8 @@ async def plan_job(
                 plan = Plan(
                     scene_summary=plan.scene_summary,
                     global_rules=plan.global_rules,
-                    steps=fallback_steps
+                    steps=fallback_steps,
+                    agentic_analysis=plan.agentic_analysis
                 )
 
         # Ensure prompt variations exist for each step
@@ -404,7 +413,8 @@ async def run_job(
     background_tasks: BackgroundTasks,
     x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
     x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
-    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
 ):
     """
     Run all steps in the job sequentially.
@@ -414,7 +424,7 @@ async def run_job(
         raise HTTPException(status_code=404, detail="Job not found")
     
     # Always take frontend key for access
-    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key):
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key):
         storage.save_job(job)
         pubsub.emit_log(job_id, "Updated API keys from frontend")
     
@@ -431,7 +441,8 @@ async def reframe_job(
     request: ReframeRequest = ReframeRequest(),
     x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
     x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
-    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
 ):
     """
     Create and run a single reframe step (16:9).
@@ -451,7 +462,7 @@ async def reframe_job(
             elif image_provider == "openai" and x_openai_api_key:
                 job.metadata["image_api_key"] = x_openai_api_key
 
-    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key):
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key):
         storage.save_job(job)
         pubsub.emit_log(job_id, "Updated API keys from frontend")
 
@@ -485,7 +496,8 @@ async def edit_job(
     request: EditRequest,
     x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
     x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
-    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
 ):
     """
     Create and run a single edit step using the provided prompt.
@@ -505,7 +517,7 @@ async def edit_job(
             elif image_provider == "openai" and x_openai_api_key:
                 job.metadata["image_api_key"] = x_openai_api_key
 
-    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key):
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key):
         storage.save_job(job)
         pubsub.emit_log(job_id, "Updated API keys from frontend")
 
@@ -539,7 +551,8 @@ async def run_step(
     background_tasks: BackgroundTasks,
     x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
     x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
-    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
 ):
     """
     Run a single step.
@@ -549,7 +562,7 @@ async def run_step(
         raise HTTPException(status_code=404, detail="Job not found")
     
     # Always take frontend key for access
-    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key):
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key):
         storage.save_job(job)
         pubsub.emit_log(job_id, "Updated API keys from frontend")
     
@@ -620,7 +633,8 @@ async def retry_step(
     background_tasks: BackgroundTasks,
     x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
     x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
-    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
 ):
     """
     Retry a step with a custom prompt.
@@ -630,7 +644,7 @@ async def retry_step(
         raise HTTPException(status_code=404, detail="Job not found")
     
     # Always take frontend key for access
-    _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key)
+    _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key)
     
     step = next((s for s in job.steps if s.id == step_id), None)
     if not step:
@@ -663,7 +677,8 @@ async def bg_remove_step(
     background_tasks: BackgroundTasks,
     x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
     x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
-    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key")
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
 ):
     """
     Apply Fal.ai background removal to step output.
@@ -673,7 +688,7 @@ async def bg_remove_step(
         raise HTTPException(status_code=404, detail="Job not found")
     
     # Always take frontend key for access
-    _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key)
+    _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key)
     
     step = next((s for s in job.steps if s.id == step_id), None)
     if not step:

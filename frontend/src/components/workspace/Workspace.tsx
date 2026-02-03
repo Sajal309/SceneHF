@@ -132,7 +132,8 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
             // Build image config
             const imageConfig: Record<string, any> = {
                 provider: settings.imageProvider,
-                model: settings.imageModel
+                model: settings.imageModel,
+                fal_model: settings.falModel
             };
             Object.entries(settings.imageParams).forEach(([key, param]) => {
                 if (param.enabled) {
@@ -144,17 +145,6 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
         } catch (error) {
             console.error('Planning failed:', error);
             alert(`Planning failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    };
-
-    const handleRun = async () => {
-        if (!job) return;
-
-        try {
-            const headers = getApiHeaders(settings);
-            await api.runJob(job.id, headers);
-        } catch (error) {
-            console.error('Run failed:', error);
         }
     };
 

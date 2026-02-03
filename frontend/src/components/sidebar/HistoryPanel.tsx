@@ -25,6 +25,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
     const [editPreviewUrl, setEditPreviewUrl] = useState<string | null>(null);
     const [reframeCollapsed, setReframeCollapsed] = useState(true);
     const [editCollapsed, setEditCollapsed] = useState(true);
+    const [segmentationCollapsed, setSegmentationCollapsed] = useState(true);
     const [planLoadingJobId, setPlanLoadingJobId] = useState<string | null>(null);
     const [locatingJobId, setLocatingJobId] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -186,7 +187,8 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
             const headers = getApiHeaders(settings);
             const imageConfig: Record<string, any> = {
                 provider: settings.imageProvider,
-                model: settings.imageModel
+                model: settings.imageModel,
+                fal_model: settings.falModel
             };
             Object.entries(settings.imageParams).forEach(([key, param]) => {
                 if (param.enabled) imageConfig[key] = param.value;
@@ -232,7 +234,8 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
             const headers = getApiHeaders(settings);
             const imageConfig: Record<string, any> = {
                 provider: settings.imageProvider,
-                model: settings.imageModel
+                model: settings.imageModel,
+                fal_model: settings.falModel
             };
             Object.entries(settings.imageParams).forEach(([key, param]) => {
                 if (param.enabled) imageConfig[key] = param.value;
@@ -726,106 +729,119 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                             )}
                         </div>
 
-                        {otherJobs.map((job) => {
-                            const imageUrl = getSourceImageUrl(job);
-                            const stepCount = job.steps?.length || 0;
-                            const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
-                            const hasReframe = isReframeJob(job);
-
-                            return (
-                                <div
-                                    key={job.id}
-                                    className={`rounded-lg border overflow-hidden transition-all hover:shadow-lg cursor-pointer ${currentJobId === job.id
-                                        ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
-                                        : 'border-[var(--border)] bg-[var(--panel)] hover:border-[var(--border-strong)]'
-                                        }`}
-                                    onClick={() => onLoadJob(job.id)}
-                                >
-                                    <div className="relative group/card">
-                                        <button
-                                            onClick={(e) => handleDelete(e, job.id)}
-                                            className="absolute top-2 right-2 p-1.5 bg-white/80 hover:bg-red-500/80 text-[var(--text)] hover:text-white rounded opacity-0 group-hover/card:opacity-100 transition-all z-10 border border-[var(--border)]"
-                                            title="Delete Job"
-                                        >
-                                            <TrashIcon />
-                                        </button>
-
-                                        {/* Thumbnail */}
-                                        <div className="aspect-video w-full bg-[var(--panel-contrast)] overflow-hidden">
-                                            {imageUrl ? (
-                                                <ImageWithAspectBadge
-                                                    src={imageUrl}
-                                                    alt="Source"
-                                                    className="w-full h-full object-cover"
-                                                    wrapperClassName="w-full h-full"
-                                                    draggable
-                                                    onDragStart={(e) => {
-                                                        e.stopPropagation();
-                                                        if (!job.source_image) return;
-                                                        e.dataTransfer.setData(
-                                                            'application/x-scenehf-asset',
-                                                            JSON.stringify({
-                                                                jobId: job.id,
-                                                                assetId: job.source_image,
-                                                                filename: `source_${job.id.slice(0, 8)}.png`
-                                                            })
-                                                        );
-                                                        e.dataTransfer.effectAllowed = 'copy';
-                                                    }}
-                                                />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-[var(--text-subtle)]">
-                                                    No Image
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Details */}
-                                        <div className="p-3 space-y-2">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-xs font-mono text-[var(--text-subtle)]">
-                                                    {job.id.slice(0, 8)}
-                                                </span>
-                                                <div className="flex items-center gap-2">
-                                                    {hasReframe && (
-                                                        <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--accent)] text-[var(--accent-strong)] bg-[var(--accent-soft)]">
-                                                            Reframe
-                                                        </span>
-                                                    )}
-                                                    <span className={`text-xs px-2 py-0.5 rounded-full ${job.status === 'DONE' ? 'bg-green-100 text-[var(--success)]' :
-                                                        job.status === 'RUNNING' ? 'bg-blue-100 text-[var(--accent-strong)]' :
-                                                            job.status === 'FAILED' ? 'bg-red-100 text-[var(--danger)]' :
-                                                                'bg-[var(--panel-contrast)] text-[var(--text-subtle)]'
-                                                        }`}>
-                                                        {job.status}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            {stepCount > 0 && (
-                                                <div className="text-xs text-[var(--text-muted)]">
-                                                    {completedSteps}/{stepCount} steps completed
-                                                </div>
-                                            )}
-
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-[10px] text-[var(--text-subtle)]">
-                                                    {new Date(job.created_at).toLocaleDateString()}
-                                                </span>
-                                                <button
-                                                    onClick={(e) => handleLocateFolder(e, job.id)}
-                                                    disabled={locatingJobId === job.id}
-                                                    className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                                    title="Locate generation folder"
-                                                >
-                                                    {locatingJobId === job.id ? 'Opening...' : 'Locate Folder'}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
+                        <div className="glass-card rounded-xl p-4 space-y-3">
+                            <button
+                                onClick={() => setSegmentationCollapsed(!segmentationCollapsed)}
+                                className="w-full flex items-center justify-between"
+                            >
+                                <div className="text-sm font-semibold text-[var(--text)]">Segmentation</div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--accent)] text-[var(--accent-strong)] bg-[var(--accent-soft)]">
+                                        Segmentation
+                                    </span>
+                                    <span className="text-xs text-[var(--text-subtle)]">
+                                        {segmentationCollapsed ? 'Show' : 'Hide'}
+                                    </span>
                                 </div>
-                            );
-                        })}
+                            </button>
+                            {!segmentationCollapsed && (
+                                <div className="space-y-2">
+                                    {otherJobs.length === 0 && (
+                                        <div className="text-xs text-[var(--text-subtle)]">No segmentation jobs yet.</div>
+                                    )}
+                                    {otherJobs.map((job) => {
+                                        const imageUrl = getSourceImageUrl(job);
+                                        const stepCount = job.steps?.length || 0;
+                                        const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
+
+                                        return (
+                                            <div
+                                                key={job.id}
+                                                className={`rounded-lg border overflow-hidden transition-all hover:shadow-lg cursor-pointer ${currentJobId === job.id
+                                                    ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                                                    : 'border-[var(--border)] bg-[var(--panel)] hover:border-[var(--border-strong)]'
+                                                    }`}
+                                                onClick={() => onLoadJob(job.id)}
+                                            >
+                                                <div className="relative group/card">
+                                                    <button
+                                                        onClick={(e) => handleDelete(e, job.id)}
+                                                        className="absolute top-2 right-2 p-1.5 bg-white/80 hover:bg-red-500/80 text-[var(--text)] hover:text-white rounded opacity-0 group-hover/card:opacity-100 transition-all z-10 border border-[var(--border)]"
+                                                        title="Delete Job"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+
+                                                    <div className="aspect-video w-full bg-[var(--panel-contrast)] overflow-hidden">
+                                                        {imageUrl ? (
+                                                            <ImageWithAspectBadge
+                                                                src={imageUrl}
+                                                                alt="Source"
+                                                                className="w-full h-full object-cover"
+                                                                wrapperClassName="w-full h-full"
+                                                                draggable
+                                                                onDragStart={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (!job.source_image) return;
+                                                                    e.dataTransfer.setData(
+                                                                        'application/x-scenehf-asset',
+                                                                        JSON.stringify({
+                                                                            jobId: job.id,
+                                                                            assetId: job.source_image,
+                                                                            filename: `source_${job.id.slice(0, 8)}.png`
+                                                                        })
+                                                                    );
+                                                                    e.dataTransfer.effectAllowed = 'copy';
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <div className="w-full h-full flex items-center justify-center text-[var(--text-subtle)]">
+                                                                No Image
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="p-3 space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-xs font-mono text-[var(--text-subtle)]">
+                                                                {job.id.slice(0, 8)}
+                                                            </span>
+                                                            <span className={`text-xs px-2 py-0.5 rounded-full ${job.status === 'DONE' ? 'bg-green-100 text-[var(--success)]' :
+                                                                job.status === 'RUNNING' ? 'bg-blue-100 text-[var(--accent-strong)]' :
+                                                                    job.status === 'FAILED' ? 'bg-red-100 text-[var(--danger)]' :
+                                                                        'bg-[var(--panel-contrast)] text-[var(--text-subtle)]'
+                                                                }`}>
+                                                                {job.status}
+                                                            </span>
+                                                        </div>
+
+                                                        {stepCount > 0 && (
+                                                            <div className="text-xs text-[var(--text-muted)]">
+                                                                {completedSteps}/{stepCount} steps completed
+                                                            </div>
+                                                        )}
+
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-[10px] text-[var(--text-subtle)]">
+                                                                {new Date(job.created_at).toLocaleDateString()}
+                                                            </span>
+                                                            <button
+                                                                onClick={(e) => handleLocateFolder(e, job.id)}
+                                                                disabled={locatingJobId === job.id}
+                                                                className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                                title="Locate generation folder"
+                                                            >
+                                                                {locatingJobId === job.id ? 'Opening...' : 'Locate Folder'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
 
                         {jobs.length === 0 && !loading && (
                             <div className="text-center py-12 text-[var(--text-subtle)] text-sm">

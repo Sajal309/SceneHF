@@ -159,11 +159,11 @@ export function PreviewPane({ job, step }: PreviewPaneProps) {
                             />
                         )}
 
-                        {step && (step.status === 'RUNNING' || step.status === 'QUEUED') && (
+                        {step && step.status === 'RUNNING' && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/70 backdrop-blur-[2px]">
                                 <div className="w-10 h-10 border-4 border-[var(--accent-soft)] border-t-[var(--accent)] rounded-full animate-spin" />
                                 <div className="text-sm font-semibold text-[var(--text)] tracking-widest uppercase animate-pulse">
-                                    {step.status === 'RUNNING' ? 'Generating...' : 'Queued...'}
+                                    Generating...
                                 </div>
                             </div>
                         )}

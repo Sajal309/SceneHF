@@ -128,11 +128,17 @@ class Runner:
             output_img = None
             
             if step.type == StepType.BG_REMOVE:
+                if not fal_service:
+                    raise RuntimeError("Fal background removal service is unavailable. Install fal-client.")
                 pubsub.emit_log(job_id, "Calling Fal.ai background removal...")
+                fal_api_key = (job.metadata or {}).get("fal_api_key")
+                fal_model = ((job.metadata or {}).get("image_config") or {}).get("fal_model")
                 tmp_path = await asyncio.to_thread(
                     fal_service.remove_bg,
                     str(input_path),
-                    output_dir=str(storage._assets_subdir(job_id, "derived"))
+                    output_dir=str(storage._assets_subdir(job_id, "derived")),
+                    api_key=fal_api_key,
+                    model=fal_model
                 )
                 with Image.open(tmp_path) as img:
                     output_img = img.copy()

@@ -118,10 +118,26 @@ class PlanStep(BaseModel):
     fallbacks: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class PlanAgenticAction(BaseModel):
+    action: str
+    reason: str
+
+
+class PlanAgenticAnalysis(BaseModel):
+    mode: str = "MANUAL"
+    scene_complexity: str = ""
+    estimated_layer_count: Optional[int] = None
+    risk_level: str = ""
+    decision_rationale: str = ""
+    potential_challenges: List[str] = Field(default_factory=list)
+    recommended_next_actions: List[PlanAgenticAction] = Field(default_factory=list)
+
+
 class Plan(BaseModel):
     scene_summary: str
     global_rules: List[str] = Field(default_factory=list)
     steps: List[PlanStep] = Field(default_factory=list)
+    agentic_analysis: Optional[PlanAgenticAnalysis] = None
 
 
 class Job(BaseModel):

@@ -17,17 +17,13 @@ class FalBgRemoveService:
     def __init__(self):
         if not FAL_AVAILABLE:
             raise ImportError("fal-client package not installed. Run: pip install fal-client")
-        
-        api_key = os.getenv("FAL_KEY")
-        if not api_key:
-            raise ValueError("FAL_KEY not set")
-        
-        os.environ["FAL_KEY"] = api_key
     
     def remove_bg(
         self,
         input_path: str,
-        output_dir: Optional[str] = None
+        output_dir: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None
     ) -> str:
         """
         Remove background from image using Fal.ai.
@@ -39,12 +35,19 @@ class FalBgRemoveService:
         Returns:
             Path to output image with background removed
         """
+        resolved_key = api_key or os.getenv("FAL_KEY")
+        if not resolved_key:
+            raise ValueError("Fal API key is missing. Provide X-Fal-Api-Key or set FAL_KEY.")
+        os.environ["FAL_KEY"] = resolved_key
+
+        model_id = model or "fal-ai/imageutils/rembg"
+
         # Upload image to Fal
         image_url = fal_client.upload_file(input_path)
         
         # Call background removal
         result = fal_client.subscribe(
-            "fal-ai/imageutils/rembg",
+            model_id,
             arguments={
                 "image_url": image_url
             }
@@ -79,6 +82,6 @@ class FalBgRemoveService:
 # Global service instance (only if available)
 try:
     fal_service = FalBgRemoveService()
-except (ImportError, ValueError) as e:
+except ImportError as e:
     print(f"Fal service not available: {e}")
     fal_service = None

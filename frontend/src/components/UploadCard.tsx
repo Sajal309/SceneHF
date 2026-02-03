@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { PlusIcon, TrashIcon, LayersIcon } from '@radix-ui/react-icons';
+import { LayersIcon } from '@radix-ui/react-icons';
 import { useSettings, getApiHeaders } from '../context/SettingsContext';
 import { api } from '../lib/api';
 import { ImageWithAspectBadge } from './common/ImageWithAspectBadge';
@@ -137,7 +137,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
         setLayers(layers.map(l => l.index === index ? { ...l, name } : l));
     };
 
-    const handleGeneratePlan = async () => {
+    const handleGeneratePlan = async (autoMode = false) => {
         if (!uploadedFile) return;
 
         setUploading(true);
@@ -159,7 +159,8 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
 
             const imageConfig: Record<string, any> = {
                 provider: settings.imageProvider,
-                model: settings.imageModel
+                model: settings.imageModel,
+                fal_model: settings.falModel
             };
             Object.entries(settings.imageParams).forEach(([key, param]) => {
                 if (param.enabled) imageConfig[key] = param.value;
@@ -172,9 +173,9 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                 llmConfig,
                 imageConfig,
                 headers,
-                sceneDescription,
-                layerCount,
-                layers
+                sceneDescription.trim() || undefined,
+                autoMode ? undefined : layerCount,
+                autoMode ? undefined : layers
             );
 
             onJobCreated(job_id);
@@ -184,6 +185,10 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
         } finally {
             setUploading(false);
         }
+    };
+
+    const handleAutoGeneratePlan = async () => {
+        await handleGeneratePlan(true);
     };
 
     const handleReframe = async () => {
@@ -197,7 +202,8 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
             const headers = getApiHeaders(settings);
             const imageConfig: Record<string, any> = {
                 provider: settings.imageProvider,
-                model: settings.imageModel
+                model: settings.imageModel,
+                fal_model: settings.falModel
             };
             Object.entries(settings.imageParams).forEach(([key, param]) => {
                 if (param.enabled) imageConfig[key] = param.value;
@@ -223,7 +229,8 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
             const headers = getApiHeaders(settings);
             const imageConfig: Record<string, any> = {
                 provider: settings.imageProvider,
-                model: settings.imageModel
+                model: settings.imageModel,
+                fal_model: settings.falModel
             };
             Object.entries(settings.imageParams).forEach(([key, param]) => {
                 if (param.enabled) imageConfig[key] = param.value;
@@ -425,14 +432,26 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                         </p>
                     </div>
 
-                    {/* Generate Button */}
-                    <button
-                        onClick={handleGeneratePlan}
-                        disabled={uploading || !sceneDescription.trim()}
-                        className="w-full py-4 bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-white rounded-xl font-semibold text-lg transition-all disabled:cursor-not-allowed shadow-[var(--shadow-card)]"
-                    >
-                        {uploading ? 'Generating Plan...' : '✨ Generate Layer Plan'}
-                    </button>
+                    {/* Generate Buttons */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <button
+                            onClick={handleAutoGeneratePlan}
+                            disabled={uploading}
+                            className="w-full py-4 bg-[var(--panel-contrast)] hover:bg-[var(--panel-muted)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-[var(--text)] rounded-xl font-semibold text-lg transition-all disabled:cursor-not-allowed border border-[var(--border-strong)]"
+                        >
+                            {uploading ? 'Generating Plan...' : 'Auto'}
+                        </button>
+                        <button
+                            onClick={() => handleGeneratePlan(false)}
+                            disabled={uploading || !sceneDescription.trim()}
+                            className="w-full py-4 bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-white rounded-xl font-semibold text-lg transition-all disabled:cursor-not-allowed shadow-[var(--shadow-card)]"
+                        >
+                            {uploading ? 'Generating Plan...' : '✨ Generate Layer Plan'}
+                        </button>
+                    </div>
+                    <p className="text-xs text-[var(--text-subtle)]">
+                        Auto lets the agent decide layer count, layer prompts, and scene summary from the uploaded image.
+                    </p>
                         </>
                     )}
 

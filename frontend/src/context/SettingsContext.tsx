@@ -19,6 +19,8 @@ export interface SettingsState {
     imageProvider: 'vertex' | 'openai' | 'google';
     imageModel: string;
     imageApiKey: string;
+    falModel: string;
+    falApiKey: string;
 }
 
 const DEFAULT_SETTINGS: SettingsState = {
@@ -37,6 +39,8 @@ const DEFAULT_SETTINGS: SettingsState = {
     imageProvider: 'openai',
     imageModel: 'gpt-image-1.5',
     imageApiKey: '',
+    falModel: 'fal-ai/imageutils/rembg',
+    falApiKey: '',
 };
 
 interface SettingsContextType {
@@ -115,6 +119,9 @@ export function getApiHeaders(settings: SettingsState) {
     }
     if (settings.imageApiKey) {
         headers['X-Image-Api-Key'] = settings.imageApiKey;
+    }
+    if (settings.falApiKey) {
+        headers['X-Fal-Api-Key'] = settings.falApiKey;
     }
     return headers;
 }
