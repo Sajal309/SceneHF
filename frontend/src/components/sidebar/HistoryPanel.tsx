@@ -103,6 +103,25 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
     const editJobs = jobs.filter(isEditJob);
     const otherJobs = jobs.filter(job => !isReframeJob(job) && !isEditJob(job));
 
+    const getLatestGeneratedAssetId = (job: Job, stepType: 'REFRAME' | 'EDIT') => {
+        const typeSteps = (job.steps || []).filter((s) => s.type === stepType);
+        if (!typeSteps.length) return undefined;
+
+        // Prefer explicit output asset on the latest step of this type.
+        const latestTypeStep = typeSteps[typeSteps.length - 1];
+        if (latestTypeStep.output_asset_id) return latestTypeStep.output_asset_id;
+
+        // Fallback to outputs history (latest first).
+        const outputs = latestTypeStep.outputs_history || [];
+        if (outputs.length) return outputs[outputs.length - 1];
+
+        // Last resort: any asset linked to this step id (latest by created_at).
+        const candidates = Object.values(job.assets || {}).filter((asset) => asset.step_id === latestTypeStep.id);
+        if (!candidates.length) return undefined;
+        candidates.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        return candidates[0].id;
+    };
+
     const handleDrag = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -412,7 +431,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                             const imageUrl = getSourceImageUrl(job);
                                             const stepCount = job.steps?.length || 0;
                                             const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
-                                            const outputAssetId = job.steps?.find(s => s.type === 'REFRAME')?.output_asset_id;
+                                            const outputAssetId = getLatestGeneratedAssetId(job, 'REFRAME');
                                             const downloadUrl = outputAssetId ? api.getAssetUrl(job.id, outputAssetId) : null;
 
                                             return (
@@ -607,7 +626,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                             const imageUrl = getSourceImageUrl(job);
                                             const stepCount = job.steps?.length || 0;
                                             const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
-                                            const outputAssetId = job.steps?.find(s => s.type === 'EDIT')?.output_asset_id;
+                                            const outputAssetId = getLatestGeneratedAssetId(job, 'EDIT');
                                             const downloadUrl = outputAssetId ? api.getAssetUrl(job.id, outputAssetId) : null;
 
                                             return (

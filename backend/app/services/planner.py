@@ -2,6 +2,7 @@ import os
 import base64
 import json
 from typing import Optional, List, Dict, Any
+from pathlib import Path
 
 # Support both OpenAI and Google AI
 try:
@@ -29,6 +30,7 @@ PLANNER_PROMPT = """You are an expert at analyzing images for layer extraction a
 Analyze this background image and create a detailed step-by-step plan to extract layers and create plates.
 
 {layer_instructions}
+{reference_examples}
 
 CRITICAL RULES (must be in every plan):
 1. No cropping, shifting, or zooming - preserve exact alignment
@@ -129,6 +131,76 @@ class Planner:
         """Encode image to base64."""
         with open(image_path, 'rb') as f:
             return base64.b64encode(f.read()).decode('utf-8')
+
+    def _build_reference_examples(self, max_examples: int = 3) -> str:
+        """
+        Build compact in-context examples from previous generated plans.
+        These examples guide cohesive layer decisions in AUTO mode.
+        """
+        jobs_dir = Path(__file__).resolve().parents[2] / "data" / "jobs"
+        if not jobs_dir.exists():
+            return ""
+
+        candidates: List[Dict[str, Any]] = []
+        for job_file in jobs_dir.glob("*/job.json"):
+            try:
+                with open(job_file, "r", encoding="utf-8") as f:
+                    job_data = json.load(f)
+                plan = job_data.get("plan") or {}
+                steps = plan.get("steps") or []
+                if not steps:
+                    continue
+
+                extract_steps = [s for s in steps if str(s.get("type", "")).upper() == "EXTRACT"]
+                if len(extract_steps) < 2:
+                    continue
+
+                remove_steps = [s for s in steps if str(s.get("type", "")).upper() == "REMOVE"]
+                scene_summary = str(plan.get("scene_summary", "")).strip()
+                layer_targets = [
+                    str(s.get("target") or s.get("name") or "").strip()
+                    for s in extract_steps[:6]
+                    if str(s.get("target") or s.get("name") or "").strip()
+                ]
+                if not layer_targets:
+                    continue
+
+                candidates.append({
+                    "scene_summary": scene_summary,
+                    "layer_targets": layer_targets,
+                    "extract_count": len(extract_steps),
+                    "remove_count": len(remove_steps),
+                    "mtime": job_file.stat().st_mtime,
+                })
+            except Exception:
+                continue
+
+        if not candidates:
+            return ""
+
+        # Prefer recent, medium-complex, practical examples.
+        candidates.sort(
+            key=lambda c: (
+                -int(2 <= c["extract_count"] <= 8),
+                -c["mtime"],
+                -c["extract_count"],
+            )
+        )
+        selected = candidates[:max_examples]
+
+        lines = [
+            "REFERENCE EXAMPLES (use these to improve cohesive layer planning decisions; do not copy verbatim):"
+        ]
+        for idx, ex in enumerate(selected, start=1):
+            summary = ex["scene_summary"] or "Scene with layered foreground/midground/background elements."
+            summary = summary[:220]
+            targets = ", ".join(ex["layer_targets"][:6])
+            lines.append(
+                f"- Example {idx}: scene='{summary}' | extracts={ex['extract_count']} | "
+                f"plates={ex['remove_count']} | foreground->background layers: {targets}"
+            )
+        lines.append("")
+        return "\n".join(lines)
     
     def generate_plan(
         self, 
@@ -145,6 +217,7 @@ class Planner:
         """
         use_provider = provider or self.provider
         config = model_config or {}
+        reference_examples = self._build_reference_examples(max_examples=3)
         
         # Build layer instructions
         layer_instructions = ""
@@ -168,9 +241,9 @@ class Planner:
             )
         
         if use_provider == "openai":
-            return self._generate_plan_openai(image_path, config, api_key, layer_instructions)
+            return self._generate_plan_openai(image_path, config, api_key, layer_instructions, reference_examples)
         elif use_provider == "gemini":
-            return self._generate_plan_gemini(image_path, config, api_key, layer_instructions)
+            return self._generate_plan_gemini(image_path, config, api_key, layer_instructions, reference_examples)
         else:
             raise ValueError(f"Unknown provider: {use_provider}")
 
@@ -193,7 +266,8 @@ class Planner:
         image_path: str, 
         config: dict,
         api_key: Optional[str] = None,
-        layer_instructions: str = ""
+        layer_instructions: str = "",
+        reference_examples: str = ""
     ) -> Plan:
         """Generate plan using OpenAI."""
         if not OPENAI_AVAILABLE:
@@ -224,7 +298,10 @@ class Planner:
         
         model_name = config.get("model", "gpt-4o")
         
-        formatted_prompt = PLANNER_PROMPT.format(layer_instructions=layer_instructions)
+        formatted_prompt = PLANNER_PROMPT.format(
+            layer_instructions=layer_instructions,
+            reference_examples=reference_examples
+        )
         
         # Build arguments dynamically
         completion_args = {
@@ -274,7 +351,8 @@ class Planner:
         image_path: str, 
         config: dict,
         api_key: Optional[str] = None,
-        layer_instructions: str = ""
+        layer_instructions: str = "",
+        reference_examples: str = ""
     ) -> Plan:
         """Generate plan using Gemini via google-genai SDK 1.0+."""
         if not GENAI_AVAILABLE:
@@ -310,7 +388,10 @@ class Planner:
         
         try:
             img = Image.open(image_path)
-            formatted_prompt = PLANNER_PROMPT.format(layer_instructions=layer_instructions)
+            formatted_prompt = PLANNER_PROMPT.format(
+                layer_instructions=layer_instructions,
+                reference_examples=reference_examples
+            )
             
             gen_config = {}
             if "temperature" in config:

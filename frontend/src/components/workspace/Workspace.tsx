@@ -78,7 +78,7 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
         setLogs(prev => [...prev, log]);
     }, []);
 
-    useJobSSE(jobId, {
+    useJobSSE(job?.id || null, {
         onJobUpdate: handleJobUpdate,
         onStepUpdate: handleStepUpdate,
         onLog: handleLog
@@ -107,6 +107,13 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
                 setJob(jobData);
             } catch (error) {
                 console.error('Failed to load job:', error);
+                const msg = error instanceof Error ? error.message : String(error);
+                if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
+                    localStorage.removeItem('scenehf_last_job');
+                    setJob(null);
+                    setSelectedStepId(null);
+                    onJobCreated(null);
+                }
             }
         };
 

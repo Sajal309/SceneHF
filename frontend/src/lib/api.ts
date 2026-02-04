@@ -174,7 +174,16 @@ export const api = {
 
     async getJob(jobId: string): Promise<Job> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}`);
-        if (!res.ok) throw new Error('Failed to get job');
+        if (!res.ok) {
+            let errorMsg = `Failed to get job (${res.status})`;
+            try {
+                const errorData = await res.json();
+                if (errorData?.detail) errorMsg = errorData.detail;
+            } catch (e) {
+                // ignore
+            }
+            throw new Error(errorMsg);
+        }
         return res.json();
     },
 

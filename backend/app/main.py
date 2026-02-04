@@ -45,9 +45,12 @@ app = FastAPI(
 )
 
 # CORS for local development
+# Allow localhost on any port (handles Vite using 5173 or 5174)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    # Use a regex to allow other localhost dev ports (e.g., 5174 when 5173 is busy)
+    allow_origin_regex=r"http://localhost(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
