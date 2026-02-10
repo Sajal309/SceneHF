@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Job, api } from '../../lib/api';
-import { ChevronLeftIcon, ChevronRightIcon, ReloadIcon, TrashIcon, DownloadIcon } from '@radix-ui/react-icons';
+import { AssetKind, Job, api } from '../../lib/api';
+import { ChevronLeftIcon, ChevronRightIcon, ReloadIcon, TrashIcon, DownloadIcon, UpdateIcon } from '@radix-ui/react-icons';
 import { useSettings, getApiHeaders } from '../../context/SettingsContext';
 import { ImageWithAspectBadge } from '../common/ImageWithAspectBadge';
 
@@ -28,6 +28,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
     const [segmentationCollapsed, setSegmentationCollapsed] = useState(true);
     const [planLoadingJobId, setPlanLoadingJobId] = useState<string | null>(null);
     const [locatingJobId, setLocatingJobId] = useState<string | null>(null);
+    const [bgRemovingJobId, setBgRemovingJobId] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const editInputRef = useRef<HTMLInputElement>(null);
 
@@ -120,6 +121,44 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         if (!candidates.length) return undefined;
         candidates.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         return candidates[0].id;
+    };
+
+    const getLatestBgRemovedPair = (job: Job, stepType?: 'REFRAME' | 'EDIT') => {
+        const steps = stepType
+            ? (job.steps || []).filter((step) => step.type === stepType)
+            : (job.steps || []);
+        for (let stepIndex = steps.length - 1; stepIndex >= 0; stepIndex -= 1) {
+            const step = steps[stepIndex];
+            const ids = [...(step.outputs_history || [])];
+            if (step.output_asset_id && ids[ids.length - 1] !== step.output_asset_id) {
+                ids.push(step.output_asset_id);
+            }
+
+            let bgRemovedAssetId: string | undefined;
+            for (let i = ids.length - 1; i >= 0; i -= 1) {
+                const candidate = job.assets?.[ids[i]];
+                if (candidate?.kind === AssetKind.BG_REMOVED) {
+                    bgRemovedAssetId = candidate.id;
+                    break;
+                }
+            }
+            if (!bgRemovedAssetId) continue;
+
+            let originalAssetId: string | undefined;
+            for (let i = ids.length - 1; i >= 0; i -= 1) {
+                const candidate = job.assets?.[ids[i]];
+                if (candidate?.id !== bgRemovedAssetId && candidate?.kind !== AssetKind.BG_REMOVED) {
+                    originalAssetId = candidate.id;
+                    break;
+                }
+            }
+            if (!originalAssetId && step.input_asset_id) {
+                originalAssetId = step.input_asset_id;
+            }
+
+            return { bgRemovedAssetId, originalAssetId };
+        }
+        return null;
     };
 
     const handleDrag = (e: React.DragEvent) => {
@@ -321,6 +360,30 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
             setError(err.message || 'Failed to open generation folder');
         } finally {
             setLocatingJobId(null);
+        }
+    };
+
+    const handleRemoveBgForEditJob = async (e: React.MouseEvent, job: Job) => {
+        e.stopPropagation();
+        const editSteps = (job.steps || []).filter((step) => step.type === 'EDIT');
+        const latestEditStep = editSteps[editSteps.length - 1];
+        if (!latestEditStep?.output_asset_id) {
+            setError('No edit output available yet for background removal.');
+            return;
+        }
+
+        setError(null);
+        setBgRemovingJobId(job.id);
+        try {
+            const headers = getApiHeaders(settings);
+            await api.bgRemoveStep(job.id, latestEditStep.id, headers);
+            await loadJobs();
+            onLoadJob(job.id);
+        } catch (err: any) {
+            console.error('Failed to remove background:', err);
+            setError(err.message || 'Failed to remove background');
+        } finally {
+            setBgRemovingJobId(null);
         }
     };
 
@@ -627,6 +690,9 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                             const stepCount = job.steps?.length || 0;
                                             const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
                                             const outputAssetId = getLatestGeneratedAssetId(job, 'EDIT');
+                                            const bgPair = getLatestBgRemovedPair(job, 'EDIT');
+                                            const latestEditStep = (job.steps || []).filter((step) => step.type === 'EDIT').slice(-1)[0];
+                                            const canRemoveBg = !!latestEditStep?.output_asset_id;
                                             const downloadUrl = outputAssetId ? api.getAssetUrl(job.id, outputAssetId) : null;
 
                                             return (
@@ -724,6 +790,15 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                     >
                                                                         {planLoadingJobId === job.id ? 'Preparing...' : 'Generate Plan'}
                                                                     </button>
+                                                                    <button
+                                                                        onClick={(e) => handleRemoveBgForEditJob(e, job)}
+                                                                        disabled={!canRemoveBg || bgRemovingJobId === job.id}
+                                                                        className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                                        title="Remove background from latest edit output"
+                                                                    >
+                                                                        <UpdateIcon className={bgRemovingJobId === job.id ? 'animate-spin' : ''} />
+                                                                        {bgRemovingJobId === job.id ? 'Removing...' : 'Remove BG'}
+                                                                    </button>
                                                                     {downloadUrl && (
                                                                         <a
                                                                             href={downloadUrl}
@@ -738,6 +813,48 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                     )}
                                                                 </div>
                                                             </div>
+                                                            {bgPair?.bgRemovedAssetId && (
+                                                                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[var(--border)]">
+                                                                    {bgPair.originalAssetId && (
+                                                                        <div className="rounded-md border border-[var(--border)] p-2 bg-[var(--panel-contrast)]">
+                                                                            <div className="text-[10px] text-[var(--text-subtle)] mb-1">Original</div>
+                                                                            <ImageWithAspectBadge
+                                                                                src={api.getAssetUrl(job.id, bgPair.originalAssetId)}
+                                                                                alt="Original"
+                                                                                className="w-full h-16 object-cover rounded"
+                                                                                wrapperClassName="w-full"
+                                                                            />
+                                                                            <a
+                                                                                href={api.getAssetUrl(job.id, bgPair.originalAssetId)}
+                                                                                download={`original_${job.id.slice(0, 8)}.png`}
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                className="mt-2 inline-flex items-center gap-1 text-[10px] text-[var(--success)] hover:text-[var(--accent-strong)]"
+                                                                            >
+                                                                                <DownloadIcon />
+                                                                                Download
+                                                                            </a>
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="rounded-md border border-[var(--border)] p-2 bg-[var(--panel-contrast)]">
+                                                                        <div className="text-[10px] text-[var(--text-subtle)] mb-1">BG Removed</div>
+                                                                        <ImageWithAspectBadge
+                                                                            src={api.getAssetUrl(job.id, bgPair.bgRemovedAssetId)}
+                                                                            alt="BG removed"
+                                                                            className="w-full h-16 object-cover rounded"
+                                                                            wrapperClassName="w-full"
+                                                                        />
+                                                                        <a
+                                                                            href={api.getAssetUrl(job.id, bgPair.bgRemovedAssetId)}
+                                                                            download={`bg_removed_${job.id.slice(0, 8)}.png`}
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            className="mt-2 inline-flex items-center gap-1 text-[10px] text-[var(--success)] hover:text-[var(--accent-strong)]"
+                                                                        >
+                                                                            <DownloadIcon />
+                                                                            Download
+                                                                        </a>
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>

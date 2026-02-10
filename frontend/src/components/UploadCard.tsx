@@ -33,6 +33,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
         { index: 4, name: 'Sky/distant elements' }
     ]);
     const [sceneDescription, setSceneDescription] = useState('');
+    const [excludeCharactersInAuto, setExcludeCharactersInAuto] = useState(false);
     const [editPrompt, setEditPrompt] = useState('');
 
     const inputRef = useRef<HTMLInputElement>(null);
@@ -175,7 +176,8 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                 headers,
                 sceneDescription.trim() || undefined,
                 autoMode ? undefined : layerCount,
-                autoMode ? undefined : layers
+                autoMode ? undefined : layers,
+                autoMode ? excludeCharactersInAuto : undefined
             );
 
             onJobCreated(job_id);
@@ -433,6 +435,20 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                     </div>
 
                     {/* Generate Buttons */}
+                    <div className="glass-card rounded-xl p-4 space-y-2">
+                        <label className="flex items-center justify-between gap-3 text-sm text-[var(--text)]">
+                            <span className="font-semibold">Auto: Exclude Characters</span>
+                            <input
+                                type="checkbox"
+                                checked={excludeCharactersInAuto}
+                                onChange={(e) => setExcludeCharactersInAuto(e.target.checked)}
+                                className="w-4 h-4 accent-[var(--accent)]"
+                            />
+                        </label>
+                        <p className="text-xs text-[var(--text-subtle)]">
+                            When enabled, Auto plan ignores people/characters and plans only environment layers.
+                        </p>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <button
                             onClick={handleAutoGeneratePlan}

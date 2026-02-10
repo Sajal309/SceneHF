@@ -279,6 +279,10 @@ async def plan_job(
 
     # Generate plan
     try:
+        def _planner_log(message: str):
+            pubsub.emit_log(job_id, message)
+
+        pubsub.emit_log(job_id, "[planner] preparing generation inputs")
         plan = planner.generate_plan(
             str(source_path), 
             request.provider,
@@ -286,8 +290,11 @@ async def plan_job(
             api_key,
             scene_description=request.scene_description,
             layer_count=request.layer_count,
-            layer_map=request.layer_map
+            layer_map=request.layer_map,
+            exclude_characters=bool(request.exclude_characters),
+            log_hook=_planner_log
         )
+        pubsub.emit_log(job_id, f"[planner] draft plan created with {len(plan.steps)} step(s)")
 
         # Enforce layer count if provided and planner under-produces EXTRACT steps
         if request.layer_count and request.layer_map:
@@ -319,6 +326,7 @@ async def plan_job(
                 )
 
         # Ensure prompt variations exist for each step
+        pubsub.emit_log(job_id, "[planner] generating prompt variations")
         for plan_step in plan.steps:
             variations = [v.strip() for v in plan_step.prompt_variations if isinstance(v, str) and v.strip()]
             if len(variations) < 2:
@@ -341,6 +349,7 @@ async def plan_job(
                 if v and v not in unique_variations:
                     unique_variations.append(v)
             plan_step.prompt_variations = unique_variations
+        pubsub.emit_log(job_id, "[planner] prompt variation pass complete")
 
         job.plan = plan
         
@@ -683,6 +692,12 @@ async def bg_remove_step(
     """
     Apply Fal.ai background removal to step output.
     """
+    if not fal_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Fal background removal service is unavailable. Install fal-client and restart backend."
+        )
+
     job = storage.load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -706,10 +721,14 @@ async def bg_remove_step(
                 raise ValueError("Output asset not found")
             
             run_id = storage.new_run_id()
+            fal_api_key = (job.metadata or {}).get("fal_api_key")
+            fal_model = ((job.metadata or {}).get("image_config") or {}).get("fal_model")
             tmp_path = await asyncio.to_thread(
                 fal_service.remove_bg,
                 str(input_path),
-                output_dir=str(storage._assets_subdir(job_id, "derived"))
+                output_dir=str(storage._assets_subdir(job_id, "derived")),
+                api_key=fal_api_key,
+                model=fal_model
             )
             from PIL import Image
             with Image.open(tmp_path) as img:
@@ -735,6 +754,8 @@ async def bg_remove_step(
                 pass
             
             pubsub.emit_log(job_id, "Background removal completed")
+            # Emit full job update so frontend receives newly created BG_REMOVED asset metadata.
+            pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
             pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
             
         except Exception as e:

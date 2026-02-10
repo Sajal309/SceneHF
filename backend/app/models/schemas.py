@@ -166,6 +166,7 @@ class PlanRequest(BaseModel):
     scene_description: Optional[str] = None
     layer_count: Optional[int] = None
     layer_map: Optional[List[Dict[str, Any]]] = None
+    exclude_characters: Optional[bool] = False
 
 
 

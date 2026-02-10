@@ -23,6 +23,16 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
     const [maskStepId, setMaskStepId] = useState<string | null>(null);
     const [logs, setLogs] = useState<any[]>([]);
 
+    const mergeJobAssets = (prev: Job | null, updatedJob: Job): Job => {
+        if (prev?.assets && updatedJob?.assets) {
+            return {
+                ...updatedJob,
+                assets: { ...prev.assets, ...updatedJob.assets }
+            };
+        }
+        return updatedJob;
+    };
+
     // Persist job ID to localStorage
     useEffect(() => {
         if (jobId) {
@@ -76,7 +86,14 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
 
     const handleLog = useCallback((log: any) => {
         setLogs(prev => [...prev, log]);
-    }, []);
+        const message = String(log?.message || '');
+        if (!jobId) return;
+        if (message.includes('Background removal completed') || message.includes('Background removal failed')) {
+            api.getJob(jobId)
+                .then((latestJob) => setJob(prev => mergeJobAssets(prev, latestJob)))
+                .catch((err) => console.error('Failed to refresh job after BG remove log:', err));
+        }
+    }, [jobId]);
 
     useJobSSE(job?.id || null, {
         onJobUpdate: handleJobUpdate,
@@ -187,6 +204,18 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
         try {
             const headers = getApiHeaders(settings);
             await api.bgRemoveStep(job.id, stepId, headers);
+            // Fallback polling so UI updates even if SSE job/step events are delayed or missed.
+            const maxAttempts = 60;
+            for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+                const latestJob = await api.getJob(job.id);
+                const latestStep = latestJob.steps.find((s) => s.id === stepId);
+                const latestAsset = latestStep?.output_asset_id ? latestJob.assets?.[latestStep.output_asset_id] : undefined;
+                setJob(prev => mergeJobAssets(prev, latestJob));
+                if (latestAsset?.kind === 'BG_REMOVED') {
+                    break;
+                }
+            }
         } catch (error) {
             console.error('BG remove failed:', error);
         }
@@ -264,6 +293,7 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
                     onRerunStep={(stepId) => handleRerunStep(stepId)}
                     onStopStep={handleStopStep}
                     onOpenMask={(stepId) => setMaskStepId(stepId)}
+                    onBgRemove={handleBgRemove}
                 />
             </div>
             {maskStepId && job.steps.find((s) => s.id === maskStepId) && (

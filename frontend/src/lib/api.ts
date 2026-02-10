@@ -195,7 +195,8 @@ export const api = {
         headers: Record<string, string> = {},
         sceneDescription?: string,
         layerCount?: number,
-        layerMap?: any[]
+        layerMap?: any[],
+        excludeCharacters?: boolean
     ): Promise<{ message: string; steps: number }> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}/plan`, {
             method: 'POST',
@@ -209,7 +210,8 @@ export const api = {
                 image_config: imageConfig,
                 scene_description: sceneDescription,
                 layer_count: layerCount,
-                layer_map: layerMap
+                layer_map: layerMap,
+                exclude_characters: excludeCharacters
             })
         });
 
@@ -323,7 +325,16 @@ export const api = {
             }
         });
 
-        if (!res.ok) throw new Error('Failed to remove background');
+        if (!res.ok) {
+            let detail = 'Failed to remove background';
+            try {
+                const body = await res.json();
+                if (body?.detail) detail = String(body.detail);
+            } catch {
+                // Keep default error when response body is not JSON.
+            }
+            throw new Error(detail);
+        }
         return res.json();
     },
 

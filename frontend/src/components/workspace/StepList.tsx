@@ -1,4 +1,4 @@
-import { Job as JobType, Step, StepStatus, StepType, api } from '../../lib/api';
+import { AssetKind, Job as JobType, Step, StepStatus, StepType, api } from '../../lib/api';
 import { ReloadIcon, DownloadIcon, Cross2Icon, MagicWandIcon, UpdateIcon } from '@radix-ui/react-icons';
 import { useSettings, getApiHeaders } from '../../context/SettingsContext';
 import { useState, type DragEvent } from 'react';
@@ -11,14 +11,16 @@ interface StepListProps {
     onRerunStep: (stepId: string, customPrompt?: string) => void;
     onStopStep: (stepId: string) => void;
     onOpenMask: (stepId: string) => void;
+    onBgRemove: (stepId: string) => Promise<void> | void;
 }
 
-export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopStep, onOpenMask }: StepListProps) {
+export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopStep, onOpenMask, onBgRemove }: StepListProps) {
     const { settings } = useSettings();
     const [generatingVariations, setGeneratingVariations] = useState<string | null>(null); // stepId
     const [variationsMap, setVariationsMap] = useState<Record<string, string[]>>({}); // stepId -> variations
     const [dragOverStepId, setDragOverStepId] = useState<string | null>(null);
     const [uploadingStepId, setUploadingStepId] = useState<string | null>(null);
+    const [bgRemovingStepId, setBgRemovingStepId] = useState<string | null>(null);
 
     const getStatusColor = (status: StepStatus) => {
         switch (status) {
@@ -37,11 +39,36 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
         }
     };
 
+    const getBgRemovedAssetId = (step: Step): string | null => {
+        const candidates = [...(step.outputs_history || [])];
+        if (step.output_asset_id && candidates[candidates.length - 1] !== step.output_asset_id) {
+            candidates.push(step.output_asset_id);
+        }
+        for (let i = candidates.length - 1; i >= 0; i -= 1) {
+            const asset = job.assets?.[candidates[i]];
+            if (asset?.kind === AssetKind.BG_REMOVED) return asset.id;
+        }
+        return null;
+    };
+
+    const getOriginalOutputAssetId = (step: Step): string | null => {
+        const candidates = [...(step.outputs_history || [])];
+        if (step.output_asset_id && candidates[candidates.length - 1] !== step.output_asset_id) {
+            candidates.push(step.output_asset_id);
+        }
+        for (let i = candidates.length - 1; i >= 0; i -= 1) {
+            const asset = job.assets?.[candidates[i]];
+            if (asset && asset.kind !== AssetKind.BG_REMOVED) return asset.id;
+        }
+        return step.output_asset_id || null;
+    };
+
     const handleDownload = async (step: Step) => {
-        if (!step.output_asset_id) return;
+        const originalAssetId = getOriginalOutputAssetId(step);
+        if (!originalAssetId) return;
 
         try {
-            const url = api.getAssetUrl(job.id, step.output_asset_id);
+            const url = api.getAssetUrl(job.id, originalAssetId);
             const response = await fetch(url);
             const blob = await response.blob();
             const downloadUrl = window.URL.createObjectURL(blob);
@@ -130,6 +157,15 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
         }
     };
 
+    const handleBgRemove = async (stepId: string) => {
+        setBgRemovingStepId(stepId);
+        try {
+            await onBgRemove(stepId);
+        } finally {
+            setBgRemovingStepId(null);
+        }
+    };
+
     return (
         <div className="w-96 glass-panel border-l border-[var(--border)] flex flex-col">
             {/* Header */}
@@ -161,6 +197,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                 ) : (
                     job.steps.map((step) => {
                         const isSelected = selectedStep?.id === step.id;
+                        const bgRemovedAssetId = getBgRemovedAssetId(step);
                         const imageUrl = step.output_asset_id
                             ? api.getAssetUrl(job.id, step.output_asset_id)
                             : step.input_asset_id
@@ -363,6 +400,19 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                                         Save
                                                     </button>
                                                 )}
+                                                {step.output_asset_id && (
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleBgRemove(step.id);
+                                                        }}
+                                                        disabled={bgRemovingStepId === step.id}
+                                                        className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs bg-[var(--panel-contrast)] hover:bg-[var(--border)] text-[var(--text-subtle)] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        <UpdateIcon className={`w-3 h-3 ${bgRemovingStepId === step.id ? 'animate-spin' : ''}`} />
+                                                        {bgRemovingStepId === step.id ? 'Removing...' : 'Remove BG'}
+                                                    </button>
+                                                )}
                                                 {canMask && (
                                                     <button
                                                         onClick={(e) => {
@@ -426,6 +476,27 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                     {requiresMask && (
                                         <div className="text-[10px] text-[var(--warning)]">
                                             Manual mask selected. Upload or draw a mask to run.
+                                        </div>
+                                    )}
+
+                                    {bgRemovedAssetId && (
+                                        <div className="pt-2 border-t border-[var(--border)] space-y-2">
+                                            <div className="text-[10px] text-[var(--text-subtle)]">BG Removed</div>
+                                            <ImageWithAspectBadge
+                                                src={api.getAssetUrl(job.id, bgRemovedAssetId)}
+                                                alt="Background removed"
+                                                className="w-full h-20 object-cover rounded-md border border-[var(--border)]"
+                                                wrapperClassName="w-full"
+                                            />
+                                            <a
+                                                href={api.getAssetUrl(job.id, bgRemovedAssetId)}
+                                                download={`${step.name.replace(/\s+/g, '_').toLowerCase()}_bg_removed.png`}
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-[var(--panel-contrast)] hover:bg-[var(--border)] text-[var(--text)] rounded border border-[var(--border)]"
+                                            >
+                                                <DownloadIcon className="w-3 h-3" />
+                                                Download BG Removed
+                                            </a>
                                         </div>
                                     )}
                                 </div>

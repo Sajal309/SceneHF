@@ -1,8 +1,9 @@
 import os
 import base64
 import json
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from pathlib import Path
+from io import BytesIO
 
 # Support both OpenAI and Google AI
 try:
@@ -43,6 +44,7 @@ CRITICAL RULES (must be in every plan):
 8. If a scene description is provided, the plan MUST follow it. Do not contradict it or invent elements not described.
 9. When user layer specs are NOT provided, choose 2-10 extraction layers that best represent the scene and keep the plan practical.
 10. Think like an execution agent: assess complexity, identify likely challenges, and recommend what should happen next.
+11. In AUTO mode, avoid redundant layer splits. Consecutive EXTRACT layers must be meaningfully distinct and should not heavily overlap in content/mask area.
 
 For each step, specify:
 - Clear target description (matching user's layer map when provided)
@@ -50,6 +52,12 @@ For each step, specify:
 - 3-5 prompt variations that preserve the same objective
 - Validation thresholds (min_nonwhite, max_nonwhite for extractions; min_nonwhite for plates)
 - Fallback strategies if validation fails
+
+AUTO LAYER QUALITY CHECKS (must apply when user layer specs are not provided):
+- Prefer semantic layers (foreground subject, props, midground, background, sky) over arbitrary patches.
+- Keep overlap low between EXTRACT targets. If two planned layers likely overlap heavily (roughly >35%), merge them or redefine boundaries.
+- Avoid making 2-3 foreground layers that isolate nearly the same region.
+- If uncertainty is high, reduce layer count rather than creating ambiguous overlapping layers.
 
 Return ONLY valid JSON matching this schema:
 {{
@@ -77,7 +85,8 @@ Return ONLY valid JSON matching this schema:
       "prompt_variations": ["variation 1", "variation 2", "variation 3"],
       "validate": {{"min_nonwhite": 0.01, "max_nonwhite": 0.35}},
       "fallbacks": [
-        {{"action": "TIGHTEN_PROMPT", "prompt": "More specific prompt"}}
+        {{"action": "TIGHTEN_PROMPT", "prompt": "More specific prompt"}},
+        {{"action": "MERGE_OR_REDEFINE_LAYER", "prompt": "Reduce overlap with adjacent layers by merging or redefining boundaries"}}
       ]
     }},
     {{
@@ -127,66 +136,122 @@ class Planner:
         else:
             print(f"Warning: Unknown planner provider: {self.provider}")
     
-    def _encode_image(self, image_path: str) -> str:
-        """Encode image to base64."""
-        with open(image_path, 'rb') as f:
-            return base64.b64encode(f.read()).decode('utf-8')
+    def _encode_image(self, image_path: str, max_side: Optional[int] = None) -> str:
+        """Encode image to base64. Optionally downscale for prompt examples."""
+        if not max_side:
+            with open(image_path, 'rb') as f:
+                return base64.b64encode(f.read()).decode('utf-8')
+
+        from PIL import Image
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            w, h = img.size
+            scale = min(1.0, float(max_side) / float(max(w, h)))
+            if scale < 1.0:
+                img = img.resize((int(w * scale), int(h * scale)))
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=70, optimize=True)
+            return base64.b64encode(buf.getvalue()).decode('utf-8')
+
+    def _resolve_source_image_path(self, job_data: Dict[str, Any], job_dir: Path) -> Optional[Path]:
+        source_id = job_data.get("source_image")
+        assets = job_data.get("assets") or {}
+        source_asset = assets.get(source_id) if source_id else None
+        if not source_asset:
+            return None
+
+        candidate = source_asset.get("path")
+        if not candidate:
+            return None
+
+        p = Path(candidate)
+        checks = []
+        if p.is_absolute():
+            checks.append(p)
+        checks.append(job_dir / p.name)
+        checks.append(job_dir / "assets" / "source" / p.name)
+        checks.append((Path.home() / "Pictures" / "SceneGen") / p)
+        checks.append(Path("/Users/sajal/Pictures/SceneGen") / p)
+        checks.append(Path.cwd() / candidate)
+        for c in checks:
+            if c.exists():
+                return c
+        return None
+
+    def _collect_reference_examples(self, max_examples: int = 3) -> List[Dict[str, Any]]:
+        """Collect high-signal historical examples with scene/layer summaries and source image paths."""
+        roots = [
+            Path(__file__).resolve().parents[2] / "data" / "jobs",
+            Path.home() / "Pictures" / "SceneGen" / "jobs",
+        ]
+        candidates: List[Dict[str, Any]] = []
+
+        for root in roots:
+            if not root.exists():
+                continue
+            for job_file in root.glob("*/job.json"):
+                try:
+                    with open(job_file, "r", encoding="utf-8") as f:
+                        job_data = json.load(f)
+                    plan = job_data.get("plan") or {}
+                    steps = job_data.get("steps") or []
+                    if not plan or not steps:
+                        continue
+
+                    extract_steps = [s for s in steps if str(s.get("type", "")).upper() == "EXTRACT"]
+                    if len(extract_steps) < 2:
+                        continue
+
+                    successish = sum(
+                        1 for s in extract_steps if str(s.get("status", "")).upper() in ("SUCCESS", "NEEDS_REVIEW")
+                    )
+                    score = successish / max(1, len(extract_steps))
+                    if score < 0.6:
+                        continue
+
+                    remove_steps = [s for s in steps if str(s.get("type", "")).upper() == "REMOVE"]
+                    layer_targets = []
+                    for s in (plan.get("steps") or []):
+                        if str(s.get("type", "")).upper() == "EXTRACT":
+                            name = str(s.get("target") or s.get("name") or "").strip()
+                            if name:
+                                layer_targets.append(name)
+                    if not layer_targets:
+                        continue
+
+                    src_path = self._resolve_source_image_path(job_data, job_file.parent)
+                    if not src_path:
+                        continue
+
+                    candidates.append({
+                        "scene_summary": str(plan.get("scene_summary", "")).strip(),
+                        "layer_targets": layer_targets[:6],
+                        "extract_count": len(extract_steps),
+                        "remove_count": len(remove_steps),
+                        "score": score,
+                        "mtime": job_file.stat().st_mtime,
+                        "source_image_path": str(src_path),
+                    })
+                except Exception:
+                    continue
+
+        candidates.sort(
+            key=lambda c: (
+                -c["score"],
+                -int(2 <= c["extract_count"] <= 8),
+                -c["mtime"],
+            )
+        )
+        return candidates[:max_examples]
 
     def _build_reference_examples(self, max_examples: int = 3) -> str:
         """
         Build compact in-context examples from previous generated plans.
         These examples guide cohesive layer decisions in AUTO mode.
         """
-        jobs_dir = Path(__file__).resolve().parents[2] / "data" / "jobs"
-        if not jobs_dir.exists():
+        selected = self._collect_reference_examples(max_examples=max_examples)
+        if not selected:
             return ""
-
-        candidates: List[Dict[str, Any]] = []
-        for job_file in jobs_dir.glob("*/job.json"):
-            try:
-                with open(job_file, "r", encoding="utf-8") as f:
-                    job_data = json.load(f)
-                plan = job_data.get("plan") or {}
-                steps = plan.get("steps") or []
-                if not steps:
-                    continue
-
-                extract_steps = [s for s in steps if str(s.get("type", "")).upper() == "EXTRACT"]
-                if len(extract_steps) < 2:
-                    continue
-
-                remove_steps = [s for s in steps if str(s.get("type", "")).upper() == "REMOVE"]
-                scene_summary = str(plan.get("scene_summary", "")).strip()
-                layer_targets = [
-                    str(s.get("target") or s.get("name") or "").strip()
-                    for s in extract_steps[:6]
-                    if str(s.get("target") or s.get("name") or "").strip()
-                ]
-                if not layer_targets:
-                    continue
-
-                candidates.append({
-                    "scene_summary": scene_summary,
-                    "layer_targets": layer_targets,
-                    "extract_count": len(extract_steps),
-                    "remove_count": len(remove_steps),
-                    "mtime": job_file.stat().st_mtime,
-                })
-            except Exception:
-                continue
-
-        if not candidates:
-            return ""
-
-        # Prefer recent, medium-complex, practical examples.
-        candidates.sort(
-            key=lambda c: (
-                -int(2 <= c["extract_count"] <= 8),
-                -c["mtime"],
-                -c["extract_count"],
-            )
-        )
-        selected = candidates[:max_examples]
 
         lines = [
             "REFERENCE EXAMPLES (use these to improve cohesive layer planning decisions; do not copy verbatim):"
@@ -210,20 +275,37 @@ class Planner:
         api_key: Optional[str] = None,
         scene_description: Optional[str] = None,
         layer_count: Optional[int] = None,
-        layer_map: Optional[list] = None
+        layer_map: Optional[list] = None,
+        exclude_characters: bool = False,
+        log_hook: Optional[Callable[[str], None]] = None
     ) -> Plan:
         """
         Generate a dynamic extraction plan for the image.
         """
         use_provider = provider or self.provider
         config = model_config or {}
+        if log_hook:
+            log_hook(f"[planner] provider={use_provider}, model={config.get('model', 'default')}")
+        selected_examples = self._collect_reference_examples(max_examples=3)
         reference_examples = self._build_reference_examples(max_examples=3)
+        if log_hook:
+            log_hook(f"[planner] selected {len(selected_examples)} reference example(s)")
         
         # Build layer instructions
         layer_instructions = ""
         if scene_description:
             layer_instructions += f"SCENE DESCRIPTION: {scene_description}\n"
             layer_instructions += "The plan must follow this description exactly.\n\n"
+
+        if exclude_characters:
+            layer_instructions += (
+                "CHARACTER EXCLUSION MODE:\n"
+                "Do NOT create extraction layers for people, characters, or humanoid subjects.\n"
+                "Focus only on environment/background elements (ground, props, architecture, foliage, sky, effects).\n"
+                "If characters are present, treat them as excluded content and do not target them as separate layers.\n\n"
+            )
+            if log_hook:
+                log_hook("[planner] character exclusion is enabled (environment-only layering)")
         
         if layer_count and layer_map:
             layer_instructions += f"USER LAYER SPECIFICATIONS:\n"
@@ -241,9 +323,9 @@ class Planner:
             )
         
         if use_provider == "openai":
-            return self._generate_plan_openai(image_path, config, api_key, layer_instructions, reference_examples)
+            return self._generate_plan_openai(image_path, config, api_key, layer_instructions, reference_examples, selected_examples, log_hook)
         elif use_provider == "gemini":
-            return self._generate_plan_gemini(image_path, config, api_key, layer_instructions, reference_examples)
+            return self._generate_plan_gemini(image_path, config, api_key, layer_instructions, reference_examples, selected_examples, log_hook)
         else:
             raise ValueError(f"Unknown provider: {use_provider}")
 
@@ -267,7 +349,9 @@ class Planner:
         config: dict,
         api_key: Optional[str] = None,
         layer_instructions: str = "",
-        reference_examples: str = ""
+        reference_examples: str = "",
+        selected_examples: Optional[List[Dict[str, Any]]] = None,
+        log_hook: Optional[Callable[[str], None]] = None
     ) -> Plan:
         """Generate plan using OpenAI."""
         if not OPENAI_AVAILABLE:
@@ -297,12 +381,31 @@ class Planner:
         base64_image = self._encode_image(image_path)
         
         model_name = config.get("model", "gpt-4o")
+        if log_hook:
+            log_hook(f"[planner/openai] model={model_name}; example_images={min(2, len(selected_examples or []))}")
         
         formatted_prompt = PLANNER_PROMPT.format(
             layer_instructions=layer_instructions,
             reference_examples=reference_examples
         )
         
+        example_content = []
+        for idx, ex in enumerate((selected_examples or [])[:2], start=1):
+            scene = (ex.get("scene_summary") or "Unknown scene")[:220]
+            layers = ", ".join(ex.get("layer_targets", [])[:6])
+            example_content.append({
+                "type": "text",
+                "text": f"Reference Example {idx}: scene='{scene}'. Extract layers foreground->background: {layers}."
+            })
+            try:
+                ex_b64 = self._encode_image(ex["source_image_path"], max_side=512)
+                example_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{ex_b64}"}
+                })
+            except Exception:
+                continue
+
         # Build arguments dynamically
         completion_args = {
             "model": model_name,
@@ -311,6 +414,7 @@ class Planner:
                     "role": "user",
                     "content": [
                         {"type": "text", "text": formatted_prompt},
+                        *example_content,
                         {
                             "type": "image_url",
                             "image_url": {
@@ -335,15 +439,22 @@ class Planner:
 
         print(f"DEBUG: Calling OpenAI Chat API with model={model_name}")
         try:
+            if log_hook:
+                log_hook("[planner/openai] sending planning request")
             response = client.chat.completions.create(**completion_args)
             content = response.choices[0].message.content
             print(f"DEBUG: OpenAI raw response: {content[:100]}...")
             
             clean_content = self._clean_json_response(content)
             plan_json = json.loads(clean_content)
+            if log_hook:
+                step_count = len(plan_json.get("steps", [])) if isinstance(plan_json, dict) else 0
+                log_hook(f"[planner/openai] received and parsed JSON plan ({step_count} step(s))")
             return self._parse_plan(plan_json)
         except Exception as e:
             print(f"OpenAI Planning Error: {e}")
+            if log_hook:
+                log_hook(f"[planner/openai] planning failed: {e}")
             raise
     
     def _generate_plan_gemini(
@@ -352,7 +463,9 @@ class Planner:
         config: dict,
         api_key: Optional[str] = None,
         layer_instructions: str = "",
-        reference_examples: str = ""
+        reference_examples: str = "",
+        selected_examples: Optional[List[Dict[str, Any]]] = None,
+        log_hook: Optional[Callable[[str], None]] = None
     ) -> Plan:
         """Generate plan using Gemini via google-genai SDK 1.0+."""
         if not GENAI_AVAILABLE:
@@ -383,6 +496,8 @@ class Planner:
         
         # Use gemini-1.5-flash as default if not specified, it supports JSON
         model_name = config.get("model", "gemini-2.0-flash")
+        if log_hook:
+            log_hook(f"[planner/gemini] model={model_name}; example_images={min(2, len(selected_examples or []))}")
         
         print(f"DEBUG: Calling Gemini API with model={model_name}")
         
@@ -392,6 +507,20 @@ class Planner:
                 layer_instructions=layer_instructions,
                 reference_examples=reference_examples
             )
+
+            contents = [formatted_prompt]
+            for idx, ex in enumerate((selected_examples or [])[:2], start=1):
+                scene = (ex.get("scene_summary") or "Unknown scene")[:220]
+                layers = ", ".join(ex.get("layer_targets", [])[:6])
+                contents.append(
+                    f"Reference Example {idx}: scene='{scene}'. Extract layers foreground->background: {layers}."
+                )
+                try:
+                    ex_img = Image.open(ex["source_image_path"])
+                    contents.append(ex_img)
+                except Exception:
+                    continue
+            contents.append(img)
             
             gen_config = {}
             if "temperature" in config:
@@ -402,7 +531,7 @@ class Planner:
                 
             response = client.models.generate_content(
                 model=model_name,
-                contents=[formatted_prompt, img],
+                contents=contents,
                 config=gen_config
             )
             
@@ -413,10 +542,15 @@ class Planner:
             
             clean_content = self._clean_json_response(response.text)
             plan_json = json.loads(clean_content)
+            if log_hook:
+                step_count = len(plan_json.get("steps", [])) if isinstance(plan_json, dict) else 0
+                log_hook(f"[planner/gemini] received and parsed JSON plan ({step_count} step(s))")
             return self._parse_plan(plan_json)
             
         except Exception as e:
             print(f"Gemini Planning Error: {e}")
+            if log_hook:
+                log_hook(f"[planner/gemini] planning failed: {e}")
             raise
 
     def generate_variations(
