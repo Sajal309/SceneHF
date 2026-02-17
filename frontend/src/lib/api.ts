@@ -23,6 +23,7 @@ export enum StepType {
     EXTRACT = 'EXTRACT',
     REMOVE = 'REMOVE',
     BG_REMOVE = 'BG_REMOVE',
+    UPSCALE = 'UPSCALE',
     REFRAME = 'REFRAME',
     EDIT = 'EDIT'
 }
@@ -327,6 +328,84 @@ export const api = {
 
         if (!res.ok) {
             let detail = 'Failed to remove background';
+            try {
+                const body = await res.json();
+                if (body?.detail) detail = String(body.detail);
+            } catch {
+                // Keep default error when response body is not JSON.
+            }
+            throw new Error(detail);
+        }
+        return res.json();
+    },
+
+    async bgRemoveSource(
+        jobId: string,
+        falModel?: string,
+        headers: Record<string, string> = {}
+    ): Promise<{ message: string; step_id: string }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/source/bg-remove`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...headers
+            },
+            body: JSON.stringify({
+                fal_model: falModel
+            })
+        });
+
+        if (!res.ok) {
+            let detail = 'Failed to remove background';
+            try {
+                const body = await res.json();
+                if (body?.detail) detail = String(body.detail);
+            } catch {
+                // Keep default error when response body is not JSON.
+            }
+            throw new Error(detail);
+        }
+        return res.json();
+    },
+
+    async upscaleSource(
+        jobId: string,
+        upscaleModel?: string,
+        factor: number = 2,
+        headers: Record<string, string> = {}
+    ): Promise<{ message: string; step_id: string }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/source/upscale`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...headers
+            },
+            body: JSON.stringify({
+                fal_model: upscaleModel,
+                factor
+            })
+        });
+
+        if (!res.ok) {
+            let detail = 'Failed to upscale image';
+            try {
+                const body = await res.json();
+                if (body?.detail) detail = String(body.detail);
+            } catch {
+                // Keep default error when response body is not JSON.
+            }
+            throw new Error(detail);
+        }
+        return res.json();
+    },
+
+    async trimAlphaAsset(jobId: string, assetId: string): Promise<{ message: string; asset_id: string }> {
+        const res = await fetch(`${API_BASE}/jobs/${jobId}/assets/${assetId}/trim-alpha`, {
+            method: 'POST'
+        });
+
+        if (!res.ok) {
+            let detail = 'Failed to trim alpha';
             try {
                 const body = await res.json();
                 if (body?.detail) detail = String(body.detail);

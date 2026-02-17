@@ -159,7 +159,7 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
                                 <ImageWithAspectBadge
                                     src={imageUrl}
                                     alt="Scene"
-                                    className="w-full h-full object-contain"
+                                    className="w-full h-full object-cover"
                                     wrapperClassName="w-full h-full"
                                     draggable
                                     onDragStart={(e) => {
@@ -337,7 +337,7 @@ export function SceneEditor({ job, selectedStep, onRunPlan, onRerunStep, onBgRem
                                                         <ImageWithAspectBadge
                                                             src={api.getAssetUrl(job.id, assetId)}
                                                             alt={entry.run_id}
-                                                            className="w-full h-full object-cover"
+                                                            className="w-full h-full object-contain"
                                                             wrapperClassName="w-full h-full"
                                                         />
                                                     ) : (

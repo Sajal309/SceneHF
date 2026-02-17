@@ -35,6 +35,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
     const [sceneDescription, setSceneDescription] = useState('');
     const [excludeCharactersInAuto, setExcludeCharactersInAuto] = useState(false);
     const [editPrompt, setEditPrompt] = useState('');
+    const [removingCharacters, setRemovingCharacters] = useState(false);
 
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -138,6 +139,54 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
         setLayers(layers.map(l => l.index === index ? { ...l, name } : l));
     };
 
+    const getImageConfig = () => {
+        const imageConfig: Record<string, any> = {
+            provider: settings.imageProvider,
+            model: settings.imageModel,
+            fal_model: settings.falModel
+        };
+        Object.entries(settings.imageParams).forEach(([key, param]) => {
+            if (param.enabled) imageConfig[key] = param.value;
+        });
+        return imageConfig;
+    };
+
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const waitForStepSuccess = async (
+        jobId: string,
+        stepId: string,
+        label: string,
+        timeoutMs = 240000
+    ) => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            const job = await api.getJob(jobId);
+            const step = job.steps.find((s) => s.id === stepId);
+            if (!step) {
+                throw new Error(`${label} step not found`);
+            }
+            if (step.status === 'SUCCESS') {
+                return step;
+            }
+            if (step.status === 'FAILED' || step.status === 'CANCELLED' || step.status === 'SKIPPED') {
+                throw new Error(`${label} failed (${step.status})`);
+            }
+            await sleep(1200);
+        }
+        throw new Error(`${label} timed out`);
+    };
+
+    const assetToFile = async (jobId: string, assetId: string, baseName: string) => {
+        const res = await fetch(api.getAssetUrl(jobId, assetId));
+        if (!res.ok) {
+            throw new Error('Failed to load processed image');
+        }
+        const blob = await res.blob();
+        const extension = blob.type.split('/')[1] || 'png';
+        return new File([blob], `${baseName}.${extension}`, { type: blob.type || 'image/png' });
+    };
+
     const handleGeneratePlan = async (autoMode = false) => {
         if (!uploadedFile) return;
 
@@ -158,14 +207,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                 if (param.enabled) llmConfig[key] = param.value;
             });
 
-            const imageConfig: Record<string, any> = {
-                provider: settings.imageProvider,
-                model: settings.imageModel,
-                fal_model: settings.falModel
-            };
-            Object.entries(settings.imageParams).forEach(([key, param]) => {
-                if (param.enabled) imageConfig[key] = param.value;
-            });
+            const imageConfig = getImageConfig();
 
             // Trigger planning through standard helper
             await api.planJob(
@@ -202,14 +244,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
         try {
             const { job_id } = await api.createJob(uploadedFile);
             const headers = getApiHeaders(settings);
-            const imageConfig: Record<string, any> = {
-                provider: settings.imageProvider,
-                model: settings.imageModel,
-                fal_model: settings.falModel
-            };
-            Object.entries(settings.imageParams).forEach(([key, param]) => {
-                if (param.enabled) imageConfig[key] = param.value;
-            });
+            const imageConfig = getImageConfig();
             await api.reframeJob(job_id, imageConfig, headers);
             onJobCreated(job_id);
         } catch (err: any) {
@@ -229,14 +264,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
         try {
             const { job_id } = await api.createJob(uploadedFile);
             const headers = getApiHeaders(settings);
-            const imageConfig: Record<string, any> = {
-                provider: settings.imageProvider,
-                model: settings.imageModel,
-                fal_model: settings.falModel
-            };
-            Object.entries(settings.imageParams).forEach(([key, param]) => {
-                if (param.enabled) imageConfig[key] = param.value;
-            });
+            const imageConfig = getImageConfig();
             await api.editJob(job_id, editPrompt.trim(), imageConfig, headers);
             onJobCreated(job_id);
         } catch (err: any) {
@@ -244,6 +272,66 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
             setError(err.message || 'Failed to edit image');
         } finally {
             setUploading(false);
+        }
+    };
+
+    const handleRemoveCharacter = async () => {
+        if (!uploadedFile) return;
+
+        setRemovingCharacters(true);
+        setError(null);
+
+        let reframeJobId: string | null = null;
+        let removeJobId: string | null = null;
+
+        try {
+            const headers = getApiHeaders(settings);
+            const imageConfig = getImageConfig();
+
+            const reframeJob = await api.createJob(uploadedFile);
+            reframeJobId = reframeJob.job_id;
+            const reframeResult = await api.reframeJob(reframeJob.job_id, imageConfig, headers);
+            const reframeStep = await waitForStepSuccess(reframeJob.job_id, reframeResult.step_id, 'Reframe');
+            if (!reframeStep.output_asset_id) {
+                throw new Error('Reframe did not return an output image');
+            }
+
+            const reframedFile = await assetToFile(
+                reframeJob.job_id,
+                reframeStep.output_asset_id,
+                `reframed_${uploadedFile.name.replace(/\.[^/.]+$/, '')}`
+            );
+
+            const removeJob = await api.createJob(reframedFile);
+            removeJobId = removeJob.job_id;
+            const removeResult = await api.editJob(
+                removeJob.job_id,
+                'Remove all characters and people from this image.',
+                imageConfig,
+                headers
+            );
+            const removeStep = await waitForStepSuccess(removeJob.job_id, removeResult.step_id, 'Character removal');
+            if (!removeStep.output_asset_id) {
+                throw new Error('Character removal did not return an output image');
+            }
+
+            const cleanedFile = await assetToFile(
+                removeJob.job_id,
+                removeStep.output_asset_id,
+                `character_removed_${uploadedFile.name.replace(/\.[^/.]+$/, '')}`
+            );
+            handleFile(cleanedFile);
+        } catch (err: any) {
+            console.error('Character removal failed:', err);
+            setError(err.message || 'Failed to remove characters');
+        } finally {
+            setRemovingCharacters(false);
+            if (reframeJobId) {
+                api.deleteJob(reframeJobId).catch(() => undefined);
+            }
+            if (removeJobId) {
+                api.deleteJob(removeJobId).catch(() => undefined);
+            }
         }
     };
 
@@ -358,7 +446,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                             </div>
                             <button
                                 onClick={handleReframe}
-                                disabled={uploading}
+                                disabled={uploading || removingCharacters}
                                 className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-white rounded-xl font-semibold text-base transition-all disabled:cursor-not-allowed shadow-[var(--shadow-card)]"
                             >
                                 {uploading ? 'Reframing...' : 'Reframe Image'}
@@ -368,6 +456,19 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
 
                     {workflow === 'segmentation' && (
                         <>
+                    <div className="glass-card rounded-xl p-6 space-y-3">
+                        <div className="text-sm font-semibold text-[var(--text)]">Preprocess</div>
+                        <p className="text-xs text-[var(--text-subtle)]">
+                            Reframe to 16:9, then remove all characters from the selected image.
+                        </p>
+                        <button
+                            onClick={handleRemoveCharacter}
+                            disabled={uploading || removingCharacters || !uploadedFile}
+                            className="w-full py-3 bg-[var(--panel-contrast)] hover:bg-[var(--panel-muted)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-[var(--text)] rounded-xl font-semibold text-sm transition-all disabled:cursor-not-allowed border border-[var(--border-strong)]"
+                        >
+                            {removingCharacters ? 'Removing Characters...' : 'Remove Character'}
+                        </button>
+                    </div>
                     {/* Scene Description */}
                     <div className="glass-card rounded-xl p-6 space-y-3">
                         <label className="text-sm font-semibold text-[var(--text)] flex items-center gap-2">
@@ -452,14 +553,14 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <button
                             onClick={handleAutoGeneratePlan}
-                            disabled={uploading}
+                            disabled={uploading || removingCharacters}
                             className="w-full py-4 bg-[var(--panel-contrast)] hover:bg-[var(--panel-muted)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-[var(--text)] rounded-xl font-semibold text-lg transition-all disabled:cursor-not-allowed border border-[var(--border-strong)]"
                         >
                             {uploading ? 'Generating Plan...' : 'Auto'}
                         </button>
                         <button
                             onClick={() => handleGeneratePlan(false)}
-                            disabled={uploading || !sceneDescription.trim()}
+                            disabled={uploading || removingCharacters || !sceneDescription.trim()}
                             className="w-full py-4 bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-white rounded-xl font-semibold text-lg transition-all disabled:cursor-not-allowed shadow-[var(--shadow-card)]"
                         >
                             {uploading ? 'Generating Plan...' : '✨ Generate Layer Plan'}
@@ -482,7 +583,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                             />
                             <button
                                 onClick={handleEdit}
-                                disabled={uploading || !editPrompt.trim()}
+                                disabled={uploading || removingCharacters || !editPrompt.trim()}
                                 className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-[var(--border)] disabled:text-[var(--text-subtle)] text-white rounded-xl font-semibold text-base transition-all disabled:cursor-not-allowed shadow-[var(--shadow-card)]"
                             >
                                 {uploading ? 'Generating...' : 'Generate Edit'}

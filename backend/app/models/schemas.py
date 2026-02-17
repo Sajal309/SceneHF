@@ -18,6 +18,7 @@ class StepType(str, Enum):
     EXTRACT = "EXTRACT"
     REMOVE = "REMOVE"
     BG_REMOVE = "BG_REMOVE"
+    UPSCALE = "UPSCALE"
     REFRAME = "REFRAME"
     EDIT = "EDIT"
 
@@ -195,6 +196,19 @@ class StepPatchRequest(BaseModel):
 class ReframeRequest(BaseModel):
     image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
     prompt: Optional[str] = None
+
+
+class BgRemoveRequest(BaseModel):
+    fal_model: Optional[str] = None
+    # Backward-compatible; ignored except for optional fal_model extraction.
+    image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
+class UpscaleRequest(BaseModel):
+    fal_model: Optional[str] = None
+    factor: int = Field(default=2, ge=1, le=6)
+    # Backward-compatible; ignored except for optional model/factor extraction.
+    image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 class EditRequest(BaseModel):

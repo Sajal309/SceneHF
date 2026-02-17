@@ -8,12 +8,13 @@ from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Header, Body
 from fastapi.responses import FileResponse
+from PIL import Image
 
 from app.models.schemas import (
     Job, Step, StepType, StepStatus, StepAction,
     JobStatus, AssetKind, JobCreateResponse,
     PlanRequest, RetryRequest, PlateAndRetryRequest,
-    PromptVariationsRequest, StepPatchRequest, MaskMode, ReframeRequest, EditRequest, PlanStep, Plan
+    PromptVariationsRequest, StepPatchRequest, MaskMode, ReframeRequest, EditRequest, PlanStep, Plan, BgRemoveRequest, UpscaleRequest
 )
 from app.core.storage import storage
 from app.core.pubsub import pubsub
@@ -21,6 +22,7 @@ from app.core.runner import runner
 from app.services.planner import planner
 from app.services.vertex_image import get_vertex_image_service
 from app.services.fal_bgremove import fal_service
+from app.services.fal_upscale import fal_upscale_service
 from app.core.masks import load_mask_binary
 
 
@@ -496,6 +498,158 @@ async def reframe_job(
     background_tasks.add_task(runner.run_step, job_id, step_id)
 
     return {"message": "Reframe started", "step_id": step_id}
+
+
+@router.post("/jobs/{job_id}/source/bg-remove")
+async def bg_remove_source(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    request: BgRemoveRequest = BgRemoveRequest(),
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
+):
+    """
+    Create and run a background-removal step using the job source image.
+    This route is Fal.ai-only.
+    """
+    if not fal_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Fal background removal service is unavailable. Install fal-client and restart backend."
+        )
+
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job.source_image:
+        raise HTTPException(status_code=400, detail="Job has no source image")
+
+    if not job.metadata:
+        job.metadata = {}
+
+    requested_fal_model = (
+        request.fal_model
+        or (request.image_config or {}).get("fal_model")
+        or (job.metadata.get("image_config") or {}).get("fal_model")
+    )
+    # Force Fal provider for this operation, regardless of currently selected image provider.
+    job.metadata["image_config"] = {
+        "provider": "fal",
+        "fal_model": requested_fal_model,
+    }
+
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key):
+        storage.save_job(job)
+        pubsub.emit_log(job_id, "Updated API keys from frontend")
+
+    step_id = str(uuid.uuid4())
+    step = Step(
+        id=step_id,
+        index=len(job.steps),
+        name="Background Removal (Fal.ai)",
+        type=StepType.BG_REMOVE,
+        prompt="Remove background using Fal.ai.",
+        status=StepStatus.QUEUED,
+        input_asset_id=job.source_image,
+        image_config={
+            "provider": "fal",
+            "fal_model": requested_fal_model,
+        }
+    )
+    job.steps.append(step)
+    job.status = JobStatus.RUNNING
+    storage.save_job(job)
+
+    pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
+    pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
+
+    background_tasks.add_task(runner.run_step, job_id, step_id)
+
+    return {"message": "Background removal started", "step_id": step_id}
+
+
+@router.post("/jobs/{job_id}/source/upscale")
+async def upscale_source(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    request: UpscaleRequest = UpscaleRequest(),
+    x_google_api_key: Optional[str] = Header(None, alias="X-Google-Api-Key"),
+    x_openai_api_key: Optional[str] = Header(None, alias="X-Openai-Api-Key"),
+    x_image_api_key: Optional[str] = Header(None, alias="X-Image-Api-Key"),
+    x_fal_api_key: Optional[str] = Header(None, alias="X-Fal-Api-Key")
+):
+    """
+    Create and run an upscaling step using the job source image.
+    This route is Fal.ai-only.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job.source_image:
+        raise HTTPException(status_code=400, detail="Job has no source image")
+
+    if not job.metadata:
+        job.metadata = {}
+
+    requested_upscale_model = (
+        request.fal_model
+        or (request.image_config or {}).get("upscale_model")
+        or (job.metadata.get("upscale_config") or {}).get("upscale_model")
+    )
+
+    raw_factor = request.factor if request.factor is not None else (request.image_config or {}).get("factor", 2)
+    try:
+        factor = int(raw_factor)
+    except Exception:
+        factor = 2
+    factor = max(1, min(6, factor))
+
+    # For factor > 1 we need Fal upscaler support.
+    if factor > 1 and not fal_upscale_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Fal upscale service is unavailable. Install fal-client and restart backend."
+        )
+
+    job.metadata["upscale_config"] = {
+        "provider": "fal",
+        "upscale_model": requested_upscale_model,
+        "factor": factor,
+    }
+
+    if _update_job_keys_from_headers(job, x_google_api_key, x_openai_api_key, x_image_api_key, x_fal_api_key):
+        storage.save_job(job)
+        pubsub.emit_log(job_id, "Updated API keys from frontend")
+
+    step_id = str(uuid.uuid4())
+    step = Step(
+        id=step_id,
+        index=len(job.steps),
+        name=f"Upscale {factor}x (Fal.ai)",
+        type=StepType.UPSCALE,
+        prompt=f"Upscale image by {factor}x using Fal.ai.",
+        status=StepStatus.QUEUED,
+        input_asset_id=job.source_image,
+        image_config={
+            "provider": "fal",
+            "upscale_model": requested_upscale_model,
+            "factor": factor,
+        }
+    )
+    job.steps.append(step)
+    job.status = JobStatus.RUNNING
+    storage.save_job(job)
+
+    pubsub.emit_step_updated(job_id, step.model_dump(mode='json'))
+    pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
+
+    background_tasks.add_task(runner.run_step, job_id, step_id)
+
+    return {"message": "Upscale started", "step_id": step_id}
 
 
 @router.post("/jobs/{job_id}/edit")
@@ -986,6 +1140,61 @@ async def replace_step_image(
     finally:
         if temp_path.exists():
             temp_path.unlink()
+
+
+@router.post("/jobs/{job_id}/assets/{asset_id}/trim-alpha")
+async def trim_alpha_asset(job_id: str, asset_id: str):
+    """
+    Crop away fully transparent margins from an asset.
+    """
+    job = storage.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    source_asset = job.assets.get(asset_id)
+    if not source_asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    source_path = storage.get_asset_path(job_id, asset_id)
+    if not source_path:
+        raise HTTPException(status_code=404, detail="Asset file not found")
+
+    try:
+        with Image.open(source_path) as img:
+            rgba = img.convert("RGBA")
+            alpha = rgba.getchannel("A")
+            bbox = alpha.getbbox()
+            trimmed = rgba.crop(bbox) if bbox else rgba.copy()
+
+        run_id = storage.new_run_id()
+        trimmed_asset = storage.save_image(
+            job_id=job_id,
+            step_id=source_asset.step_id or "alpha_trim",
+            run_id=run_id,
+            kind="alpha_trimmed",
+            pil_image=trimmed,
+            asset_kind=AssetKind.BG_REMOVED,
+            job=job,
+            subdir="derived",
+        )
+
+        if not job.metadata:
+            job.metadata = {}
+        alpha_trimmed_assets = job.metadata.get("alpha_trimmed_assets")
+        if not isinstance(alpha_trimmed_assets, dict):
+            alpha_trimmed_assets = {}
+        alpha_trimmed_assets[asset_id] = trimmed_asset.id
+        job.metadata["alpha_trimmed_assets"] = alpha_trimmed_assets
+
+        storage.save_job(job)
+        pubsub.emit_log(job_id, f"Alpha-trimmed asset created: {trimmed_asset.id}")
+        pubsub.emit_job_updated(job_id, job.model_dump(mode='json'))
+
+        return {"message": "Alpha trimmed", "asset_id": trimmed_asset.id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to trim alpha: {e}")
 
 
 @router.post("/jobs/{job_id}/steps/{step_id}/accept")

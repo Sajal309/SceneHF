@@ -20,6 +20,7 @@ export interface SettingsState {
     imageModel: string;
     imageApiKey: string;
     falModel: string;
+    upscaleModel: string;
     falApiKey: string;
 }
 
@@ -40,6 +41,7 @@ const DEFAULT_SETTINGS: SettingsState = {
     imageModel: 'gpt-image-1.5',
     imageApiKey: '',
     falModel: 'fal-ai/imageutils/rembg',
+    upscaleModel: 'fal-ai/imageutils/upscale',
     falApiKey: '',
 };
 

@@ -15,6 +15,7 @@ from app.core.validators import validator
 from app.core.masks import load_mask_binary, ensure_mask_matches_input
 from app.services.vertex_image import get_vertex_image_service
 from app.services.fal_bgremove import fal_service
+from app.services.fal_upscale import fal_upscale_service
 from app.services.openai_image import get_openai_image_service
 from app.services.google_image import get_google_image_service
 from app.services.gemini_image import edit_image, edit_image_with_mask
@@ -126,6 +127,7 @@ class Runner:
             
             # Route to appropriate service
             output_img = None
+            upscale_factor = 2
             
             if step.type == StepType.BG_REMOVE:
                 if not fal_service:
@@ -158,6 +160,52 @@ class Runner:
                     Path(tmp_path).unlink(missing_ok=True)
                 except Exception:
                     pass
+
+            elif step.type == StepType.UPSCALE:
+                upscale_config = step.image_config or ((job.metadata or {}).get("upscale_config") or {})
+                upscale_model = upscale_config.get("upscale_model") or upscale_config.get("fal_model")
+                raw_factor = upscale_config.get("factor", 2)
+                try:
+                    upscale_factor = int(raw_factor)
+                except Exception:
+                    upscale_factor = 2
+                upscale_factor = max(1, min(6, upscale_factor))
+
+                if upscale_factor == 1:
+                    pubsub.emit_log(job_id, "Upscale factor is 1x. Returning original resolution image.")
+                    with Image.open(input_path) as img:
+                        output_img = img.copy()
+                else:
+                    if not fal_upscale_service:
+                        raise RuntimeError("Fal upscale service is unavailable. Install fal-client.")
+                    pubsub.emit_log(job_id, "Calling Fal.ai upscaler...")
+                    fal_api_key = (job.metadata or {}).get("fal_api_key")
+                    tmp_path = await asyncio.to_thread(
+                        fal_upscale_service.upscale,
+                        str(input_path),
+                        factor=upscale_factor,
+                        output_dir=str(storage._assets_subdir(job_id, "generations")),
+                        api_key=fal_api_key,
+                        model=upscale_model
+                    )
+                    with Image.open(tmp_path) as img:
+                        output_img = img.copy()
+                    try:
+                        Path(tmp_path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+                output_asset = storage.save_image(
+                    job_id=job_id,
+                    step_id=step_id,
+                    run_id=run_id,
+                    kind=f"upscale_{upscale_factor}x",
+                    pil_image=output_img,
+                    asset_kind=AssetKind.GENERATION,
+                    job=job,
+                    subdir="generations"
+                )
+                output_path = storage.get_asset_path(job_id, output_asset.id)
             
             elif step.type in (StepType.EXTRACT, StepType.REMOVE, StepType.REFRAME, StepType.EDIT):
                 # Check if image config specifies provider
@@ -427,6 +475,13 @@ class Runner:
                     metrics={},
                     notes="Edit completed (no validation applied)."
                 )
+            elif step.type == StepType.UPSCALE:
+                validation = ValidationResult(
+                    passed=True,
+                    status=StepStatus.SUCCESS,
+                    metrics={},
+                    notes=f"Upscale {upscale_factor}x completed."
+                )
             else:
                 # BG_REMOVE - basic validation
                 validation = validator.validate_extraction(
@@ -440,17 +495,23 @@ class Runner:
             
             # Set available actions based on status
             if step.status in (StepStatus.SUCCESS, StepStatus.NEEDS_REVIEW):
-                step.actions_available = [
-                    StepAction.ACCEPT,
-                    StepAction.RETRY,
-                    StepAction.BG_REMOVE,
-                    StepAction.PLATE_AND_RETRY
-                ]
+                if step.type == StepType.UPSCALE:
+                    step.actions_available = [StepAction.ACCEPT]
+                else:
+                    step.actions_available = [
+                        StepAction.ACCEPT,
+                        StepAction.RETRY,
+                        StepAction.BG_REMOVE,
+                        StepAction.PLATE_AND_RETRY
+                    ]
             elif step.status == StepStatus.FAILED:
-                step.actions_available = [
-                    StepAction.RETRY,
-                    StepAction.PLATE_AND_RETRY
-                ]
+                if step.type == StepType.UPSCALE:
+                    step.actions_available = [StepAction.RETRY]
+                else:
+                    step.actions_available = [
+                        StepAction.RETRY,
+                        StepAction.PLATE_AND_RETRY
+                    ]
             
             pubsub.emit_log(
                 job_id,

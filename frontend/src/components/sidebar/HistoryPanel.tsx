@@ -1,8 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import { AssetKind, Job, api } from '../../lib/api';
-import { ChevronLeftIcon, ChevronRightIcon, ReloadIcon, TrashIcon, DownloadIcon, UpdateIcon } from '@radix-ui/react-icons';
+import { ChevronLeftIcon, ChevronRightIcon, ReloadIcon, TrashIcon, DownloadIcon, MagicWandIcon, CropIcon, TransparencyGridIcon } from '@radix-ui/react-icons';
 import { useSettings, getApiHeaders } from '../../context/SettingsContext';
 import { ImageWithAspectBadge } from '../common/ImageWithAspectBadge';
+
+function FolderGlyph({ className = 'h-4 w-4' }: { className?: string }) {
+    return (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className={className} aria-hidden="true">
+            <path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h2.2a1.3 1.3 0 0 1 1.05.52l.5.7c.09.12.23.2.38.2H13A1.5 1.5 0 0 1 14.5 6.5V11A1.5 1.5 0 0 1 13 12.5H3A1.5 1.5 0 0 1 1.5 11V5Z" />
+        </svg>
+    );
+}
 
 interface HistoryPanelProps {
     currentJobId: string | null;
@@ -16,21 +24,31 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [upscaleUploading, setUpscaleUploading] = useState(false);
     const [editUploading, setEditUploading] = useState(false);
     const [dragActive, setDragActive] = useState(false);
+    const [upscaleDragActive, setUpscaleDragActive] = useState(false);
     const [editDragActive, setEditDragActive] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [editPrompt, setEditPrompt] = useState('');
     const [editFile, setEditFile] = useState<File | null>(null);
     const [editPreviewUrl, setEditPreviewUrl] = useState<string | null>(null);
     const [reframeCollapsed, setReframeCollapsed] = useState(true);
+    const [upscaleCollapsed, setUpscaleCollapsed] = useState(true);
     const [editCollapsed, setEditCollapsed] = useState(true);
+    const [bgToolsCollapsed, setBgToolsCollapsed] = useState(true);
     const [segmentationCollapsed, setSegmentationCollapsed] = useState(true);
+    const [upscaleFactor, setUpscaleFactor] = useState(2);
     const [planLoadingJobId, setPlanLoadingJobId] = useState<string | null>(null);
     const [locatingJobId, setLocatingJobId] = useState<string | null>(null);
     const [bgRemovingJobId, setBgRemovingJobId] = useState<string | null>(null);
+    const [bgToolUploading, setBgToolUploading] = useState(false);
+    const [bgToolDragActive, setBgToolDragActive] = useState(false);
+    const [trimmingAssetKey, setTrimmingAssetKey] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const upscaleInputRef = useRef<HTMLInputElement>(null);
     const editInputRef = useRef<HTMLInputElement>(null);
+    const bgInputRef = useRef<HTMLInputElement>(null);
 
     const getDraggedAsset = (e: React.DragEvent) => {
         const raw = e.dataTransfer.getData('application/x-scenehf-asset');
@@ -50,6 +68,44 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         const extension = blob.type.split('/')[1] || 'png';
         const name = filename || `${assetId}.${extension}`;
         return new File([blob], name, { type: blob.type || 'image/png' });
+    };
+
+    const getImageConfig = () => {
+        const imageConfig: Record<string, any> = {
+            provider: settings.imageProvider,
+            model: settings.imageModel,
+            fal_model: settings.falModel
+        };
+        Object.entries(settings.imageParams).forEach(([key, param]) => {
+            if (param.enabled) imageConfig[key] = param.value;
+        });
+        return imageConfig;
+    };
+
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const waitForStepTerminal = async (
+        jobId: string,
+        stepId: string,
+        successStates: string[] = ['SUCCESS', 'NEEDS_REVIEW'],
+        timeoutMs = 240000
+    ) => {
+        const started = Date.now();
+        while (Date.now() - started < timeoutMs) {
+            const job = await api.getJob(jobId);
+            const step = (job.steps || []).find((s) => s.id === stepId);
+            if (!step) {
+                throw new Error('Step not found while waiting for completion');
+            }
+            if (successStates.includes(step.status)) {
+                return step;
+            }
+            if (step.status === 'FAILED' || step.status === 'CANCELLED' || step.status === 'SKIPPED') {
+                throw new Error(`Step failed (${step.status})`);
+            }
+            await sleep(1200);
+        }
+        throw new Error('Step timed out');
     };
 
     const loadJobs = async () => {
@@ -99,12 +155,14 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
     };
 
     const isReframeJob = (job: Job) => job.steps?.some(step => step.type === 'REFRAME');
+    const isUpscaleJob = (job: Job) => job.steps?.some(step => step.type === 'UPSCALE');
     const isEditJob = (job: Job) => job.steps?.some(step => step.type === 'EDIT');
     const reframeJobs = jobs.filter(isReframeJob);
+    const upscaleJobs = jobs.filter(isUpscaleJob);
     const editJobs = jobs.filter(isEditJob);
-    const otherJobs = jobs.filter(job => !isReframeJob(job) && !isEditJob(job));
+    const otherJobs = jobs.filter(job => !isReframeJob(job) && !isEditJob(job) && !isUpscaleJob(job));
 
-    const getLatestGeneratedAssetId = (job: Job, stepType: 'REFRAME' | 'EDIT') => {
+    const getLatestGeneratedAssetId = (job: Job, stepType: 'REFRAME' | 'EDIT' | 'UPSCALE') => {
         const typeSteps = (job.steps || []).filter((s) => s.type === stepType);
         if (!typeSteps.length) return undefined;
 
@@ -161,6 +219,53 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         return null;
     };
 
+    const getTrimmedAssetId = (job: Job, bgRemovedAssetId?: string) => {
+        if (!bgRemovedAssetId) return undefined;
+        const map = job.metadata?.alpha_trimmed_assets as Record<string, string> | undefined;
+        const trimmedId = map?.[bgRemovedAssetId];
+        if (trimmedId && job.assets?.[trimmedId]) {
+            return trimmedId;
+        }
+        return undefined;
+    };
+
+    const bgRemovalJobs = jobs
+        .filter((job) => !!getLatestBgRemovedPair(job))
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+    const isStepCompleted = (status: string) => status === 'SUCCESS' || status === 'NEEDS_REVIEW';
+
+    const summarizeSectionJobs = (sectionJobs: Job[], isCompleted: (job: Job) => boolean) => ({
+        doneCount: sectionJobs.filter(isCompleted).length,
+        hasRunning: sectionJobs.some((job) => job.status === 'RUNNING')
+    });
+
+    const reframeSummary = summarizeSectionJobs(
+        reframeJobs,
+        (job) => (job.steps || []).some((step) => step.type === 'REFRAME' && isStepCompleted(step.status))
+    );
+    const upscaleSummary = summarizeSectionJobs(
+        upscaleJobs,
+        (job) => (job.steps || []).some((step) => step.type === 'UPSCALE' && isStepCompleted(step.status))
+    );
+    const editSummary = summarizeSectionJobs(
+        editJobs,
+        (job) => (job.steps || []).some((step) => step.type === 'EDIT' && isStepCompleted(step.status))
+    );
+    const bgRemoveSummary = summarizeSectionJobs(
+        bgRemovalJobs,
+        (job) => !!getLatestBgRemovedPair(job)
+    );
+    const segmentationSummary = summarizeSectionJobs(
+        otherJobs,
+        (job) => (job.steps || []).some((step) => isStepCompleted(step.status))
+    );
+
+    const iconActionButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+    const iconDownloadButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--success)] hover:text-[var(--accent-strong)] hover:bg-[var(--border)] transition-colors';
+    const miniIconActionButtonClass = 'mt-2 inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border)] bg-[var(--panel)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+    const miniIconDownloadButtonClass = 'mt-2 inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border)] bg-[var(--panel)] text-[var(--success)] hover:text-[var(--accent-strong)] hover:bg-[var(--border)] transition-colors';
+
     const handleDrag = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -171,6 +276,16 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         }
     };
 
+    const handleUpscaleDrag = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === 'dragenter' || e.type === 'dragover') {
+            setUpscaleDragActive(true);
+        } else if (e.type === 'dragleave') {
+            setUpscaleDragActive(false);
+        }
+    };
+
     const handleEditDrag = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -178,6 +293,16 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
             setEditDragActive(true);
         } else if (e.type === 'dragleave') {
             setEditDragActive(false);
+        }
+    };
+
+    const handleBgToolDrag = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === 'dragenter' || e.type === 'dragover') {
+            setBgToolDragActive(true);
+        } else if (e.type === 'dragleave') {
+            setBgToolDragActive(false);
         }
     };
 
@@ -200,6 +325,25 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         }
     };
 
+    const handleUpscaleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setUpscaleDragActive(false);
+        const draggedAsset = getDraggedAsset(e);
+        if (draggedAsset) {
+            fileFromAsset(draggedAsset.jobId, draggedAsset.assetId, draggedAsset.filename)
+                .then(handleUpscaleFile)
+                .catch((err) => {
+                    console.error('Failed to load dragged asset:', err);
+                    setError('Failed to load dragged image');
+                });
+            return;
+        }
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            handleUpscaleFile(e.dataTransfer.files[0]);
+        }
+    };
+
     const handleEditDrop = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -219,6 +363,25 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         }
     };
 
+    const handleBgToolDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setBgToolDragActive(false);
+        const draggedAsset = getDraggedAsset(e);
+        if (draggedAsset) {
+            fileFromAsset(draggedAsset.jobId, draggedAsset.assetId, draggedAsset.filename)
+                .then(handleBgToolFile)
+                .catch((err) => {
+                    console.error('Failed to load dragged asset:', err);
+                    setError('Failed to load dragged image');
+                });
+            return;
+        }
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            handleBgToolFile(e.dataTransfer.files[0]);
+        }
+    };
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         e.preventDefault();
         if (e.target.files && e.target.files[0]) {
@@ -226,10 +389,24 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         }
     };
 
+    const handleUpscaleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        e.preventDefault();
+        if (e.target.files && e.target.files[0]) {
+            handleUpscaleFile(e.target.files[0]);
+        }
+    };
+
     const handleEditChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         e.preventDefault();
         if (e.target.files && e.target.files[0]) {
             handleEditFile(e.target.files[0]);
+        }
+    };
+
+    const handleBgToolChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        e.preventDefault();
+        if (e.target.files && e.target.files[0]) {
+            handleBgToolFile(e.target.files[0]);
         }
     };
 
@@ -243,14 +420,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         try {
             const { job_id } = await api.createJob(file);
             const headers = getApiHeaders(settings);
-            const imageConfig: Record<string, any> = {
-                provider: settings.imageProvider,
-                model: settings.imageModel,
-                fal_model: settings.falModel
-            };
-            Object.entries(settings.imageParams).forEach(([key, param]) => {
-                if (param.enabled) imageConfig[key] = param.value;
-            });
+            const imageConfig = getImageConfig();
             await api.reframeJob(job_id, imageConfig, headers);
             await loadJobs();
             onLoadJob(job_id);
@@ -259,6 +429,28 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
             setError(err.message || 'Failed to reframe image');
         } finally {
             setUploading(false);
+        }
+    };
+
+    const handleUpscaleFile = async (file: File) => {
+        if (!file.type.startsWith('image/')) {
+            setError('Please upload an image file');
+            return;
+        }
+        setError(null);
+        setUpscaleUploading(true);
+        try {
+            const { job_id } = await api.createJob(file);
+            const headers = getApiHeaders(settings);
+            const result = await api.upscaleSource(job_id, settings.upscaleModel, upscaleFactor, headers);
+            await waitForStepTerminal(job_id, result.step_id, ['SUCCESS', 'NEEDS_REVIEW']);
+            await loadJobs();
+            onLoadJob(job_id);
+        } catch (err: any) {
+            console.error('Upscale upload failed:', err);
+            setError(err.message || 'Failed to upscale image');
+        } finally {
+            setUpscaleUploading(false);
         }
     };
 
@@ -290,14 +482,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         try {
             const { job_id } = await api.createJob(editFile);
             const headers = getApiHeaders(settings);
-            const imageConfig: Record<string, any> = {
-                provider: settings.imageProvider,
-                model: settings.imageModel,
-                fal_model: settings.falModel
-            };
-            Object.entries(settings.imageParams).forEach(([key, param]) => {
-                if (param.enabled) imageConfig[key] = param.value;
-            });
+            const imageConfig = getImageConfig();
             await api.editJob(job_id, editPrompt.trim(), imageConfig, headers);
             await loadJobs();
             onLoadJob(job_id);
@@ -311,6 +496,29 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
             setError(err.message || 'Failed to edit image');
         } finally {
             setEditUploading(false);
+        }
+    };
+
+    const handleBgToolFile = async (file: File) => {
+        if (!file.type.startsWith('image/')) {
+            setError('Please upload an image file');
+            return;
+        }
+
+        setError(null);
+        setBgToolUploading(true);
+        try {
+            const { job_id } = await api.createJob(file);
+            const headers = getApiHeaders(settings);
+            const result = await api.bgRemoveSource(job_id, settings.falModel, headers);
+            await waitForStepTerminal(job_id, result.step_id, ['SUCCESS', 'NEEDS_REVIEW']);
+            await loadJobs();
+            onLoadJob(job_id);
+        } catch (err: any) {
+            console.error('Background removal upload failed:', err);
+            setError(err.message || 'Failed to remove background');
+        } finally {
+            setBgToolUploading(false);
         }
     };
 
@@ -387,6 +595,23 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         }
     };
 
+    const handleTrimAlpha = async (e: React.MouseEvent, job: Job, bgRemovedAssetId: string) => {
+        e.stopPropagation();
+        const assetKey = `${job.id}:${bgRemovedAssetId}`;
+        setError(null);
+        setTrimmingAssetKey(assetKey);
+        try {
+            await api.trimAlphaAsset(job.id, bgRemovedAssetId);
+            await loadJobs();
+            onLoadJob(job.id);
+        } catch (err: any) {
+            console.error('Failed to trim alpha:', err);
+            setError(err.message || 'Failed to resize image');
+        } finally {
+            setTrimmingAssetKey(null);
+        }
+    };
+
     return (
         <div className={`h-full flex flex-col glass-panel border-l border-[var(--border)] transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-80'}`}>
             {/* Header */}
@@ -420,7 +645,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                 {isCollapsed ? (
                     // Collapsed view: vertical thumbnails
                     <div className="flex flex-col items-center gap-2 p-2">
-                        {[...reframeJobs, ...otherJobs].slice(0, 10).map((job) => {
+                        {[...reframeJobs, ...upscaleJobs, ...otherJobs].slice(0, 10).map((job) => {
                             const imageUrl = getSourceImageUrl(job);
                             return (
                                 <button
@@ -431,7 +656,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                     title={`Job ${job.id.slice(0, 8)}`}
                                 >
                                     {imageUrl ? (
-                                        <ImageWithAspectBadge src={imageUrl} alt="Job" className="w-full h-full object-cover" wrapperClassName="w-full h-full" />
+                                        <ImageWithAspectBadge src={imageUrl} alt="Job" className="w-full h-full object-contain" wrapperClassName="w-full h-full" />
                                     ) : (
                                         <div className="w-full h-full bg-[var(--panel-contrast)] flex items-center justify-center text-[var(--text-subtle)] text-xs">
                                             ?
@@ -449,10 +674,15 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                 onClick={() => setReframeCollapsed(!reframeCollapsed)}
                                 className="w-full flex items-center justify-between"
                             >
-                                <div className="text-sm font-semibold text-[var(--text)]">Reframe History</div>
+                                <div className="text-sm font-semibold text-[var(--text)]">Reframe</div>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--accent)] text-[var(--accent-strong)] bg-[var(--accent-soft)]">
-                                        Reframe
+                                    <span
+                                        className={`inline-block h-3 w-3 rounded-full border border-white/80 shadow-sm ${reframeSummary.hasRunning ? 'bg-blue-500' : 'bg-green-500'
+                                            }`}
+                                        title={reframeSummary.hasRunning ? 'Work in progress' : 'Done'}
+                                    />
+                                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white/80 bg-white px-1.5 text-[10px] font-semibold text-slate-700 shadow-sm">
+                                        {reframeSummary.doneCount}
                                     </span>
                                     <span className="text-xs text-[var(--text-subtle)]">
                                         {reframeCollapsed ? 'Show' : 'Hide'}
@@ -520,7 +750,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                 <ImageWithAspectBadge
                                                                     src={imageUrl}
                                                                     alt="Source"
-                                                                    className="w-full h-full object-cover"
+                                                                    className="w-full h-full object-contain"
                                                                     wrapperClassName="w-full h-full"
                                                                     draggable
                                                                     onDragStart={(e) => {
@@ -579,29 +809,227 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                     <button
                                                                         onClick={(e) => handleLocateFolder(e, job.id)}
                                                                         disabled={locatingJobId === job.id}
-                                                                        className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                                                        title="Locate generation folder"
+                                                                        className={iconActionButtonClass}
+                                                                        title={locatingJobId === job.id ? 'Opening folder...' : 'Locate folder'}
+                                                                        aria-label={locatingJobId === job.id ? 'Opening folder' : 'Locate folder'}
                                                                     >
-                                                                        {locatingJobId === job.id ? 'Opening...' : 'Locate Folder'}
+                                                                        {locatingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <FolderGlyph />}
                                                                     </button>
                                                                     <button
                                                                         onClick={(e) => handleGeneratePlanFromReframe(e, job, outputAssetId)}
                                                                         disabled={!outputAssetId || planLoadingJobId === job.id}
-                                                                        className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                                                        title="Generate plan from this reframe"
+                                                                        className={iconActionButtonClass}
+                                                                        title={planLoadingJobId === job.id ? 'Preparing plan...' : 'Generate plan from this reframe'}
+                                                                        aria-label={planLoadingJobId === job.id ? 'Preparing plan' : 'Generate plan'}
                                                                     >
-                                                                        {planLoadingJobId === job.id ? 'Preparing...' : 'Generate Plan'}
+                                                                        {planLoadingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <MagicWandIcon />}
                                                                     </button>
                                                                     {downloadUrl && (
                                                                         <a
                                                                             href={downloadUrl}
                                                                             download={`reframe_${job.id.slice(0, 8)}.png`}
                                                                             onClick={(e) => e.stopPropagation()}
-                                                                            className="inline-flex items-center gap-2 text-xs text-[var(--success)] hover:text-[var(--accent-strong)] transition-colors"
+                                                                            className={iconDownloadButtonClass}
                                                                             title="Download reframe"
+                                                                            aria-label="Download reframe"
                                                                         >
                                                                             <DownloadIcon />
-                                                                            Download
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="glass-card rounded-xl p-4 space-y-3">
+                            <button
+                                onClick={() => setUpscaleCollapsed(!upscaleCollapsed)}
+                                className="w-full flex items-center justify-between"
+                            >
+                                <div className="text-sm font-semibold text-[var(--text)]">Upscale</div>
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={`inline-block h-3 w-3 rounded-full border border-white/80 shadow-sm ${upscaleSummary.hasRunning ? 'bg-blue-500' : 'bg-green-500'
+                                            }`}
+                                        title={upscaleSummary.hasRunning ? 'Work in progress' : 'Done'}
+                                    />
+                                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white/80 bg-white px-1.5 text-[10px] font-semibold text-slate-700 shadow-sm">
+                                        {upscaleSummary.doneCount}
+                                    </span>
+                                    <span className="text-xs text-[var(--text-subtle)]">
+                                        {upscaleCollapsed ? 'Show' : 'Hide'}
+                                    </span>
+                                </div>
+                            </button>
+                            {!upscaleCollapsed && (
+                                <>
+                                    <div
+                                        className={`border-2 border-dashed rounded-lg p-3 text-center transition-all cursor-pointer ${upscaleDragActive
+                                            ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                                            : 'border-[var(--border)] bg-[var(--panel-muted)] hover:border-[var(--border-strong)]'
+                                            }`}
+                                        onDragEnter={handleUpscaleDrag}
+                                        onDragLeave={handleUpscaleDrag}
+                                        onDragOver={handleUpscaleDrag}
+                                        onDrop={handleUpscaleDrop}
+                                        onClick={() => upscaleInputRef.current?.click()}
+                                    >
+                                        <input
+                                            ref={upscaleInputRef}
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleUpscaleChange}
+                                            className="hidden"
+                                        />
+                                        <div className="text-xs text-[var(--text-subtle)]">
+                                            {upscaleUploading ? 'Upscaling...' : 'Upload or drop an image to upscale'}
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-3 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs font-semibold text-[var(--text)]">Upscale Factor</span>
+                                            <span className="text-xs font-bold text-[var(--accent-strong)]">{upscaleFactor}x</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max="6"
+                                            step="1"
+                                            value={upscaleFactor}
+                                            onChange={(e) => setUpscaleFactor(parseInt(e.target.value, 10))}
+                                            className="w-full h-2 bg-[var(--panel-contrast)] rounded-lg appearance-none cursor-pointer accent-[var(--accent)]"
+                                        />
+                                        <div className="flex items-center justify-between text-[10px] text-[var(--text-subtle)]">
+                                            <span>1x</span>
+                                            <span>2x</span>
+                                            <span>3x</span>
+                                            <span>4x</span>
+                                            <span>5x</span>
+                                            <span>6x</span>
+                                        </div>
+                                    </div>
+
+                                    {error && (
+                                        <div className="text-[11px] text-[var(--danger)]">{error}</div>
+                                    )}
+
+                                    <div className="space-y-2">
+                                        {upscaleJobs.length === 0 && (
+                                            <div className="text-xs text-[var(--text-subtle)]">No upscales yet.</div>
+                                        )}
+                                        {upscaleJobs.map((job) => {
+                                            const imageUrl = getSourceImageUrl(job);
+                                            const stepCount = job.steps?.length || 0;
+                                            const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
+                                            const outputAssetId = getLatestGeneratedAssetId(job, 'UPSCALE');
+                                            const downloadUrl = outputAssetId ? api.getAssetUrl(job.id, outputAssetId) : null;
+
+                                            return (
+                                                <div
+                                                    key={job.id}
+                                                    className={`rounded-lg border overflow-hidden transition-all hover:shadow-lg cursor-pointer ${currentJobId === job.id
+                                                        ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                                                        : 'border-[var(--border)] bg-[var(--panel)] hover:border-[var(--border-strong)]'
+                                                        }`}
+                                                    onClick={() => onLoadJob(job.id)}
+                                                >
+                                                    <div className="relative group/card">
+                                                        <button
+                                                            onClick={(e) => handleDelete(e, job.id)}
+                                                            className="absolute top-2 right-2 p-1.5 bg-white/80 hover:bg-red-500/80 text-[var(--text)] hover:text-white rounded opacity-0 group-hover/card:opacity-100 transition-all z-10 border border-[var(--border)]"
+                                                            title="Delete Job"
+                                                        >
+                                                            <TrashIcon />
+                                                        </button>
+
+                                                        <div className="aspect-video w-full bg-[var(--panel-contrast)] overflow-hidden">
+                                                            {imageUrl ? (
+                                                                <ImageWithAspectBadge
+                                                                    src={imageUrl}
+                                                                    alt="Source"
+                                                                    className="w-full h-full object-contain"
+                                                                    wrapperClassName="w-full h-full"
+                                                                    draggable
+                                                                    onDragStart={(e) => {
+                                                                        e.stopPropagation();
+                                                                        if (!job.source_image) return;
+                                                                        e.dataTransfer.setData(
+                                                                            'application/x-scenehf-asset',
+                                                                            JSON.stringify({
+                                                                                jobId: job.id,
+                                                                                assetId: job.source_image,
+                                                                                filename: `source_${job.id.slice(0, 8)}.png`
+                                                                            })
+                                                                        );
+                                                                        e.dataTransfer.effectAllowed = 'copy';
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <div className="w-full h-full flex items-center justify-center text-[var(--text-subtle)]">
+                                                                    No Image
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="p-3 space-y-2">
+                                                            <div className="flex items-center justify-between">
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        navigator.clipboard.writeText(job.id);
+                                                                    }}
+                                                                    className="text-xs font-mono text-[var(--accent-strong)] hover:text-[var(--accent)] underline decoration-dotted"
+                                                                    title="Copy job ID"
+                                                                >
+                                                                    {job.id}
+                                                                </button>
+                                                                <span className={`text-xs px-2 py-0.5 rounded-full ${job.status === 'DONE' ? 'bg-green-100 text-[var(--success)]' :
+                                                                    job.status === 'RUNNING' ? 'bg-blue-100 text-[var(--accent-strong)]' :
+                                                                        job.status === 'FAILED' ? 'bg-red-100 text-[var(--danger)]' :
+                                                                            'bg-[var(--panel-contrast)] text-[var(--text-subtle)]'
+                                                                    }`}>
+                                                                    {job.status}
+                                                                </span>
+                                                            </div>
+
+                                                            {stepCount > 0 && (
+                                                                <div className="text-xs text-[var(--text-muted)]">
+                                                                    {completedSteps}/{stepCount} steps completed
+                                                                </div>
+                                                            )}
+
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-[10px] text-[var(--text-subtle)]">
+                                                                    {new Date(job.created_at).toLocaleDateString()}
+                                                                </span>
+                                                                <div className="flex items-center gap-2">
+                                                                    <button
+                                                                        onClick={(e) => handleLocateFolder(e, job.id)}
+                                                                        disabled={locatingJobId === job.id}
+                                                                        className={iconActionButtonClass}
+                                                                        title={locatingJobId === job.id ? 'Opening folder...' : 'Locate folder'}
+                                                                        aria-label={locatingJobId === job.id ? 'Opening folder' : 'Locate folder'}
+                                                                    >
+                                                                        {locatingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <FolderGlyph />}
+                                                                    </button>
+                                                                    {downloadUrl && (
+                                                                        <a
+                                                                            href={downloadUrl}
+                                                                            download={`upscale_${job.id.slice(0, 8)}.png`}
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            className={iconDownloadButtonClass}
+                                                                            title="Download upscale"
+                                                                            aria-label="Download upscale"
+                                                                        >
+                                                                            <DownloadIcon />
                                                                         </a>
                                                                     )}
                                                                 </div>
@@ -621,10 +1049,15 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                 onClick={() => setEditCollapsed(!editCollapsed)}
                                 className="w-full flex items-center justify-between"
                             >
-                                <div className="text-sm font-semibold text-[var(--text)]">Edit History</div>
+                                <div className="text-sm font-semibold text-[var(--text)]">Edit</div>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--accent)] text-[var(--accent-strong)] bg-[var(--accent-soft)]">
-                                        Edit
+                                    <span
+                                        className={`inline-block h-3 w-3 rounded-full border border-white/80 shadow-sm ${editSummary.hasRunning ? 'bg-blue-500' : 'bg-green-500'
+                                            }`}
+                                        title={editSummary.hasRunning ? 'Work in progress' : 'Done'}
+                                    />
+                                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white/80 bg-white px-1.5 text-[10px] font-semibold text-slate-700 shadow-sm">
+                                        {editSummary.doneCount}
                                     </span>
                                     <span className="text-xs text-[var(--text-subtle)]">
                                         {editCollapsed ? 'Show' : 'Hide'}
@@ -666,7 +1099,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                 <ImageWithAspectBadge
                                                     src={editPreviewUrl}
                                                     alt="Edit preview"
-                                                    className="max-h-24 rounded-md border border-[var(--border)] object-cover"
+                                                    className="max-h-24 rounded-md border border-[var(--border)] object-contain"
                                                     wrapperClassName="inline-block"
                                                 />
                                             </div>
@@ -718,7 +1151,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                 <ImageWithAspectBadge
                                                                     src={imageUrl}
                                                                     alt="Source"
-                                                                    className="w-full h-full object-cover"
+                                                                    className="w-full h-full object-contain"
                                                                     wrapperClassName="w-full h-full"
                                                                     draggable
                                                                     onDragStart={(e) => {
@@ -777,38 +1210,40 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                     <button
                                                                         onClick={(e) => handleLocateFolder(e, job.id)}
                                                                         disabled={locatingJobId === job.id}
-                                                                        className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                                                        title="Locate generation folder"
+                                                                        className={iconActionButtonClass}
+                                                                        title={locatingJobId === job.id ? 'Opening folder...' : 'Locate folder'}
+                                                                        aria-label={locatingJobId === job.id ? 'Opening folder' : 'Locate folder'}
                                                                     >
-                                                                        {locatingJobId === job.id ? 'Opening...' : 'Locate Folder'}
+                                                                        {locatingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <FolderGlyph />}
                                                                     </button>
                                                                     <button
                                                                         onClick={(e) => handleGeneratePlanFromReframe(e, job, outputAssetId)}
                                                                         disabled={!outputAssetId || planLoadingJobId === job.id}
-                                                                        className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                                                        title="Generate plan from this edit"
+                                                                        className={iconActionButtonClass}
+                                                                        title={planLoadingJobId === job.id ? 'Preparing plan...' : 'Generate plan from this edit'}
+                                                                        aria-label={planLoadingJobId === job.id ? 'Preparing plan' : 'Generate plan'}
                                                                     >
-                                                                        {planLoadingJobId === job.id ? 'Preparing...' : 'Generate Plan'}
+                                                                        {planLoadingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <MagicWandIcon />}
                                                                     </button>
                                                                     <button
                                                                         onClick={(e) => handleRemoveBgForEditJob(e, job)}
                                                                         disabled={!canRemoveBg || bgRemovingJobId === job.id}
-                                                                        className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                                                        title="Remove background from latest edit output"
+                                                                        className={iconActionButtonClass}
+                                                                        title={bgRemovingJobId === job.id ? 'Removing background...' : 'Remove background from latest edit output'}
+                                                                        aria-label={bgRemovingJobId === job.id ? 'Removing background' : 'Remove background'}
                                                                     >
-                                                                        <UpdateIcon className={bgRemovingJobId === job.id ? 'animate-spin' : ''} />
-                                                                        {bgRemovingJobId === job.id ? 'Removing...' : 'Remove BG'}
+                                                                        {bgRemovingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <TransparencyGridIcon />}
                                                                     </button>
                                                                     {downloadUrl && (
                                                                         <a
                                                                             href={downloadUrl}
                                                                             download={`edit_${job.id.slice(0, 8)}.png`}
                                                                             onClick={(e) => e.stopPropagation()}
-                                                                            className="inline-flex items-center gap-2 text-xs text-[var(--success)] hover:text-[var(--accent-strong)] transition-colors"
+                                                                            className={iconDownloadButtonClass}
                                                                             title="Download edit"
+                                                                            aria-label="Download edit"
                                                                         >
                                                                             <DownloadIcon />
-                                                                            Download
                                                                         </a>
                                                                     )}
                                                                 </div>
@@ -821,17 +1256,18 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                             <ImageWithAspectBadge
                                                                                 src={api.getAssetUrl(job.id, bgPair.originalAssetId)}
                                                                                 alt="Original"
-                                                                                className="w-full h-16 object-cover rounded"
+                                                                                className="w-full h-16 object-contain rounded"
                                                                                 wrapperClassName="w-full"
                                                                             />
                                                                             <a
                                                                                 href={api.getAssetUrl(job.id, bgPair.originalAssetId)}
                                                                                 download={`original_${job.id.slice(0, 8)}.png`}
                                                                                 onClick={(e) => e.stopPropagation()}
-                                                                                className="mt-2 inline-flex items-center gap-1 text-[10px] text-[var(--success)] hover:text-[var(--accent-strong)]"
+                                                                                className={miniIconDownloadButtonClass}
+                                                                                title="Download original"
+                                                                                aria-label="Download original"
                                                                             >
                                                                                 <DownloadIcon />
-                                                                                Download
                                                                             </a>
                                                                         </div>
                                                                     )}
@@ -840,21 +1276,240 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                         <ImageWithAspectBadge
                                                                             src={api.getAssetUrl(job.id, bgPair.bgRemovedAssetId)}
                                                                             alt="BG removed"
-                                                                            className="w-full h-16 object-cover rounded"
+                                                                            className="w-full h-16 object-contain rounded"
                                                                             wrapperClassName="w-full"
                                                                         />
                                                                         <a
                                                                             href={api.getAssetUrl(job.id, bgPair.bgRemovedAssetId)}
                                                                             download={`bg_removed_${job.id.slice(0, 8)}.png`}
                                                                             onClick={(e) => e.stopPropagation()}
-                                                                            className="mt-2 inline-flex items-center gap-1 text-[10px] text-[var(--success)] hover:text-[var(--accent-strong)]"
+                                                                            className={miniIconDownloadButtonClass}
+                                                                            title="Download background removed image"
+                                                                            aria-label="Download background removed image"
                                                                         >
                                                                             <DownloadIcon />
-                                                                            Download
                                                                         </a>
                                                                     </div>
                                                                 </div>
                                                             )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="glass-card rounded-xl p-4 space-y-3">
+                            <button
+                                onClick={() => setBgToolsCollapsed(!bgToolsCollapsed)}
+                                className="w-full flex items-center justify-between"
+                            >
+                                <div className="text-sm font-semibold text-[var(--text)]">BG Remove</div>
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={`inline-block h-3 w-3 rounded-full border border-white/80 shadow-sm ${bgRemoveSummary.hasRunning ? 'bg-blue-500' : 'bg-green-500'
+                                            }`}
+                                        title={bgRemoveSummary.hasRunning ? 'Work in progress' : 'Done'}
+                                    />
+                                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white/80 bg-white px-1.5 text-[10px] font-semibold text-slate-700 shadow-sm">
+                                        {bgRemoveSummary.doneCount}
+                                    </span>
+                                    <span className="text-xs text-[var(--text-subtle)]">
+                                        {bgToolsCollapsed ? 'Show' : 'Hide'}
+                                    </span>
+                                </div>
+                            </button>
+                            {!bgToolsCollapsed && (
+                                <>
+                                    <div
+                                        className={`border-2 border-dashed rounded-lg p-3 text-center transition-all cursor-pointer ${bgToolDragActive
+                                            ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                                            : 'border-[var(--border)] bg-[var(--panel-muted)] hover:border-[var(--border-strong)]'
+                                            }`}
+                                        onDragEnter={handleBgToolDrag}
+                                        onDragLeave={handleBgToolDrag}
+                                        onDragOver={handleBgToolDrag}
+                                        onDrop={handleBgToolDrop}
+                                        onClick={() => bgInputRef.current?.click()}
+                                    >
+                                        <input
+                                            ref={bgInputRef}
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleBgToolChange}
+                                            className="hidden"
+                                        />
+                                        <div className="text-xs text-[var(--text-subtle)]">
+                                            {bgToolUploading ? 'Removing background...' : 'Upload or drop an image to remove background'}
+                                        </div>
+                                    </div>
+                                    {error && (
+                                        <div className="text-[11px] text-[var(--danger)]">{error}</div>
+                                    )}
+                                    <div className="space-y-2">
+                                        {bgRemovalJobs.length === 0 && (
+                                            <div className="text-xs text-[var(--text-subtle)]">No background-removed images yet.</div>
+                                        )}
+                                        {bgRemovalJobs.map((job) => {
+                                            const bgPair = getLatestBgRemovedPair(job);
+                                            if (!bgPair?.bgRemovedAssetId) return null;
+
+                                            const trimmedAssetId = getTrimmedAssetId(job, bgPair.bgRemovedAssetId);
+                                            const isTrimming = trimmingAssetKey === `${job.id}:${bgPair.bgRemovedAssetId}`;
+                                            const imageUrl = getSourceImageUrl(job);
+                                            const stepCount = job.steps?.length || 0;
+                                            const completedSteps = job.steps?.filter((s) => s.status === 'SUCCESS').length || 0;
+
+                                            return (
+                                                <div
+                                                    key={job.id}
+                                                    className={`rounded-lg border overflow-hidden transition-all hover:shadow-lg cursor-pointer ${currentJobId === job.id
+                                                        ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                                                        : 'border-[var(--border)] bg-[var(--panel)] hover:border-[var(--border-strong)]'
+                                                        }`}
+                                                    onClick={() => onLoadJob(job.id)}
+                                                >
+                                                    <div className="relative group/card">
+                                                        <button
+                                                            onClick={(e) => handleDelete(e, job.id)}
+                                                            className="absolute top-2 right-2 p-1.5 bg-white/80 hover:bg-red-500/80 text-[var(--text)] hover:text-white rounded opacity-0 group-hover/card:opacity-100 transition-all z-10 border border-[var(--border)]"
+                                                            title="Delete Job"
+                                                        >
+                                                            <TrashIcon />
+                                                        </button>
+
+                                                        <div className="aspect-video w-full bg-[var(--panel-contrast)] overflow-hidden">
+                                                            {imageUrl ? (
+                                                                <ImageWithAspectBadge
+                                                                    src={imageUrl}
+                                                                    alt="Source"
+                                                                    className="w-full h-full object-contain"
+                                                                    wrapperClassName="w-full h-full"
+                                                                />
+                                                            ) : (
+                                                                <div className="w-full h-full flex items-center justify-center text-[var(--text-subtle)]">
+                                                                    No Image
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="p-3 space-y-2">
+                                                            <div className="flex items-center justify-between">
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        navigator.clipboard.writeText(job.id);
+                                                                    }}
+                                                                    className="text-xs font-mono text-[var(--accent-strong)] hover:text-[var(--accent)] underline decoration-dotted"
+                                                                    title="Copy job ID"
+                                                                >
+                                                                    {job.id}
+                                                                </button>
+                                                                <span className={`text-xs px-2 py-0.5 rounded-full ${job.status === 'DONE' ? 'bg-green-100 text-[var(--success)]' :
+                                                                    job.status === 'RUNNING' ? 'bg-blue-100 text-[var(--accent-strong)]' :
+                                                                        job.status === 'FAILED' ? 'bg-red-100 text-[var(--danger)]' :
+                                                                            'bg-[var(--panel-contrast)] text-[var(--text-subtle)]'
+                                                                    }`}>
+                                                                    {job.status}
+                                                                </span>
+                                                            </div>
+
+                                                            {stepCount > 0 && (
+                                                                <div className="text-xs text-[var(--text-muted)]">
+                                                                    {completedSteps}/{stepCount} steps completed
+                                                                </div>
+                                                            )}
+
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-[10px] text-[var(--text-subtle)]">
+                                                                    {new Date(job.created_at).toLocaleDateString()}
+                                                                </span>
+                                                                <button
+                                                                    onClick={(e) => handleLocateFolder(e, job.id)}
+                                                                    disabled={locatingJobId === job.id}
+                                                                    className={iconActionButtonClass}
+                                                                    title={locatingJobId === job.id ? 'Opening folder...' : 'Locate folder'}
+                                                                    aria-label={locatingJobId === job.id ? 'Opening folder' : 'Locate folder'}
+                                                                >
+                                                                    {locatingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <FolderGlyph />}
+                                                                </button>
+                                                            </div>
+
+                                                            <div className={`grid gap-2 pt-2 border-t border-[var(--border)] ${trimmedAssetId ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                                                                {bgPair.originalAssetId && (
+                                                                    <div className="rounded-md border border-[var(--border)] p-2 bg-[var(--panel-contrast)]">
+                                                                        <div className="text-[10px] text-[var(--text-subtle)] mb-1">Original</div>
+                                                                        <ImageWithAspectBadge
+                                                                            src={api.getAssetUrl(job.id, bgPair.originalAssetId)}
+                                                                            alt="Original"
+                                                                            className="w-full h-16 object-contain rounded"
+                                                                            wrapperClassName="w-full"
+                                                                        />
+                                                                        <a
+                                                                            href={api.getAssetUrl(job.id, bgPair.originalAssetId)}
+                                                                            download={`original_${job.id.slice(0, 8)}.png`}
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            className={miniIconDownloadButtonClass}
+                                                                            title="Download original"
+                                                                            aria-label="Download original"
+                                                                        >
+                                                                            <DownloadIcon />
+                                                                        </a>
+                                                                    </div>
+                                                                )}
+                                                                <div className="rounded-md border border-[var(--border)] p-2 bg-[var(--panel-contrast)]">
+                                                                    <div className="text-[10px] text-[var(--text-subtle)] mb-1">BG Removed</div>
+                                                                    <ImageWithAspectBadge
+                                                                        src={api.getAssetUrl(job.id, bgPair.bgRemovedAssetId)}
+                                                                        alt="BG removed"
+                                                                        className="w-full h-16 object-contain rounded"
+                                                                        wrapperClassName="w-full"
+                                                                    />
+                                                                    <button
+                                                                        onClick={(e) => handleTrimAlpha(e, job, bgPair.bgRemovedAssetId)}
+                                                                        disabled={isTrimming}
+                                                                        className={miniIconActionButtonClass}
+                                                                        title={isTrimming ? 'Resizing image...' : 'Resize by trimming transparent (alpha) area'}
+                                                                        aria-label={isTrimming ? 'Resizing image' : 'Resize image'}
+                                                                    >
+                                                                        {isTrimming ? <ReloadIcon className="animate-spin" /> : <CropIcon />}
+                                                                    </button>
+                                                                    <a
+                                                                        href={api.getAssetUrl(job.id, bgPair.bgRemovedAssetId)}
+                                                                        download={`bg_removed_${job.id.slice(0, 8)}.png`}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className={miniIconDownloadButtonClass}
+                                                                        title="Download background removed image"
+                                                                        aria-label="Download background removed image"
+                                                                    >
+                                                                        <DownloadIcon />
+                                                                    </a>
+                                                                </div>
+                                                                {trimmedAssetId && (
+                                                                    <div className="rounded-md border border-[var(--border)] p-2 bg-[var(--panel-contrast)]">
+                                                                        <div className="text-[10px] text-[var(--text-subtle)] mb-1">Resized</div>
+                                                                        <ImageWithAspectBadge
+                                                                            src={api.getAssetUrl(job.id, trimmedAssetId)}
+                                                                            alt="Resized"
+                                                                            className="w-full h-16 object-contain rounded"
+                                                                            wrapperClassName="w-full"
+                                                                        />
+                                                                        <a
+                                                                            href={api.getAssetUrl(job.id, trimmedAssetId)}
+                                                                            download={`resized_${job.id.slice(0, 8)}.png`}
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            className={miniIconDownloadButtonClass}
+                                                                            title="Download resized image"
+                                                                            aria-label="Download resized image"
+                                                                        >
+                                                                            <DownloadIcon />
+                                                                        </a>
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -872,8 +1527,13 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                             >
                                 <div className="text-sm font-semibold text-[var(--text)]">Segmentation</div>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--accent)] text-[var(--accent-strong)] bg-[var(--accent-soft)]">
-                                        Segmentation
+                                    <span
+                                        className={`inline-block h-3 w-3 rounded-full border border-white/80 shadow-sm ${segmentationSummary.hasRunning ? 'bg-blue-500' : 'bg-green-500'
+                                            }`}
+                                        title={segmentationSummary.hasRunning ? 'Work in progress' : 'Done'}
+                                    />
+                                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white/80 bg-white px-1.5 text-[10px] font-semibold text-slate-700 shadow-sm">
+                                        {segmentationSummary.doneCount}
                                     </span>
                                     <span className="text-xs text-[var(--text-subtle)]">
                                         {segmentationCollapsed ? 'Show' : 'Hide'}
@@ -913,7 +1573,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                             <ImageWithAspectBadge
                                                                 src={imageUrl}
                                                                 alt="Source"
-                                                                className="w-full h-full object-cover"
+                                                                className="w-full h-full object-contain"
                                                                 wrapperClassName="w-full h-full"
                                                                 draggable
                                                                 onDragStart={(e) => {
@@ -964,10 +1624,11 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                             <button
                                                                 onClick={(e) => handleLocateFolder(e, job.id)}
                                                                 disabled={locatingJobId === job.id}
-                                                                className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                                                title="Locate generation folder"
+                                                                className={iconActionButtonClass}
+                                                                title={locatingJobId === job.id ? 'Opening folder...' : 'Locate folder'}
+                                                                aria-label={locatingJobId === job.id ? 'Opening folder' : 'Locate folder'}
                                                             >
-                                                                {locatingJobId === job.id ? 'Opening...' : 'Locate Folder'}
+                                                                {locatingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <FolderGlyph />}
                                                             </button>
                                                         </div>
                                                     </div>

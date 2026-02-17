@@ -80,7 +80,7 @@ interface CollapsibleSectionProps {
     children: React.ReactNode;
 }
 
-function CollapsibleSection({ title, icon, defaultOpen = true, children }: CollapsibleSectionProps) {
+function CollapsibleSection({ title, icon, defaultOpen = false, children }: CollapsibleSectionProps) {
     const [isOpen, setIsOpen] = useState(defaultOpen);
 
     return (
@@ -244,8 +244,8 @@ export function SettingsPanel() {
                     </div>
                 </CollapsibleSection>
 
-                {/* Fal Background Removal Configuration */}
-                <CollapsibleSection title="Fal AI Model" icon={<ImageIcon className="w-4 h-4 text-emerald-400" />}>
+                {/* Fal Background Removal + Upscale Configuration */}
+                <CollapsibleSection title="Fal AI Tools" icon={<ImageIcon className="w-4 h-4 text-emerald-400" />}>
                     <div className="space-y-3 mt-3">
                         <div className="space-y-1">
                             <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Provider</label>
@@ -258,17 +258,34 @@ export function SettingsPanel() {
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Model</label>
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Background Removal Mode</label>
                             <input
                                 type="text"
-                                list="fal-model-options"
+                                list="fal-bg-mode-options"
                                 className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none"
                                 value={settings.falModel}
                                 onChange={(e) => updateSettings({ falModel: e.target.value })}
                                 placeholder="e.g. fal-ai/imageutils/rembg"
                             />
-                            <datalist id="fal-model-options">
+                            <datalist id="fal-bg-mode-options">
                                 <option value="fal-ai/imageutils/rembg" />
+                            </datalist>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Upscale Model</label>
+                            <input
+                                type="text"
+                                list="fal-upscale-model-options"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none"
+                                value={settings.upscaleModel}
+                                onChange={(e) => updateSettings({ upscaleModel: e.target.value })}
+                                placeholder="e.g. fal-ai/imageutils/upscale"
+                            />
+                            <datalist id="fal-upscale-model-options">
+                                <option value="fal-ai/imageutils/upscale" />
+                                <option value="fal-ai/esrgan" />
+                                <option value="fal-ai/clarity-upscaler" />
                             </datalist>
                         </div>
                     </div>
