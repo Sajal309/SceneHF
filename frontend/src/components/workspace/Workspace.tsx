@@ -1,13 +1,33 @@
-import { useCallback, useState, useEffect } from 'react';
+import { Suspense, lazy, useCallback, useState, useEffect } from 'react';
 import { useSettings, getApiHeaders } from '../../context/SettingsContext';
 import { api, Job, JobStatus } from '../../lib/api';
-import { UploadCard } from '../UploadCard';
-import { SceneEditor } from './SceneEditor';
-import { StepList } from './StepList';
-import { MaskPopup } from './MaskPopup';
-import { LogsPanel } from '../LogsPanel';
 import { PauseIcon } from '@radix-ui/react-icons';
 import { useJobSSE } from '../../lib/sse';
+
+const UploadCard = lazy(async () => {
+    const mod = await import('../UploadCard');
+    return { default: mod.UploadCard };
+});
+
+const SceneEditor = lazy(async () => {
+    const mod = await import('./SceneEditor');
+    return { default: mod.SceneEditor };
+});
+
+const StepList = lazy(async () => {
+    const mod = await import('./StepList');
+    return { default: mod.StepList };
+});
+
+const MaskPopup = lazy(async () => {
+    const mod = await import('./MaskPopup');
+    return { default: mod.MaskPopup };
+});
+
+const LogsPanel = lazy(async () => {
+    const mod = await import('../LogsPanel');
+    return { default: mod.LogsPanel };
+});
 
 interface WorkspaceProps {
     jobId: string | null;
@@ -235,11 +255,13 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
     if (!jobId || !job) {
         return (
             <div className="h-full flex items-center justify-center bg-[var(--bg)]">
-                <UploadCard
-                    onJobCreated={onJobCreated}
-                    initialFile={prefillImage}
-                    onInitialFileUsed={onPrefillImageUsed}
-                />
+                <Suspense fallback={<div className="text-sm text-[var(--text-subtle)]">Loading upload...</div>}>
+                    <UploadCard
+                        onJobCreated={onJobCreated}
+                        initialFile={prefillImage}
+                        onInitialFileUsed={onPrefillImageUsed}
+                    />
+                </Suspense>
             </div>
         );
     }
@@ -250,18 +272,22 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
             <div className="flex-1 flex">
                 {/* Center: Scene Editor */}
                 <div className="flex-1 flex flex-col min-h-0">
-                    <SceneEditor
-                        job={job}
-                        selectedStep={currentStep}
-                        onRunPlan={handlePlan}
-                        onRerunStep={handleRerunStep}
-                        onBgRemove={handleBgRemove}
-                        onClearScene={handleClearScene}
-                        onNewScene={() => onJobCreated(null)}
-                    />
+                    <Suspense fallback={<div className="flex-1 p-6 text-sm text-[var(--text-subtle)]">Loading editor...</div>}>
+                        <SceneEditor
+                            job={job}
+                            selectedStep={currentStep}
+                            onRunPlan={handlePlan}
+                            onRerunStep={handleRerunStep}
+                            onBgRemove={handleBgRemove}
+                            onClearScene={handleClearScene}
+                            onNewScene={() => onJobCreated(null)}
+                        />
+                    </Suspense>
 
                     <div className="h-56 border-t border-[var(--border)]">
-                        <LogsPanel logs={logs} />
+                        <Suspense fallback={<div className="h-full p-3 text-xs text-[var(--text-subtle)]">Loading logs...</div>}>
+                            <LogsPanel logs={logs} />
+                        </Suspense>
                     </div>
                 </div>
 
@@ -286,22 +312,26 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
                 </div>
 
                 {/* Right: Step List */}
-                <StepList
-                    job={job}
-                    selectedStep={currentStep}
-                    onSelectStep={(step) => setSelectedStepId(step.id)}
-                    onRerunStep={(stepId) => handleRerunStep(stepId)}
-                    onStopStep={handleStopStep}
-                    onOpenMask={(stepId) => setMaskStepId(stepId)}
-                    onBgRemove={handleBgRemove}
-                />
+                <Suspense fallback={<aside className="w-80 border-l border-[var(--border)] bg-[var(--panel-muted)]/40" />}>
+                    <StepList
+                        job={job}
+                        selectedStep={currentStep}
+                        onSelectStep={(step) => setSelectedStepId(step.id)}
+                        onRerunStep={(stepId) => handleRerunStep(stepId)}
+                        onStopStep={handleStopStep}
+                        onOpenMask={(stepId) => setMaskStepId(stepId)}
+                        onBgRemove={handleBgRemove}
+                    />
+                </Suspense>
             </div>
             {maskStepId && job.steps.find((s) => s.id === maskStepId) && (
-                <MaskPopup
-                    job={job}
-                    step={job.steps.find((s) => s.id === maskStepId)!}
-                    onClose={() => setMaskStepId(null)}
-                />
+                <Suspense fallback={null}>
+                    <MaskPopup
+                        job={job}
+                        step={job.steps.find((s) => s.id === maskStepId)!}
+                        onClose={() => setMaskStepId(null)}
+                    />
+                </Suspense>
             )}
         </div>
     );

@@ -212,6 +212,19 @@ class Runner:
                 image_config = step.image_config or (job.metadata.get("image_config", {}) if job.metadata else {})
                 image_provider = image_config.get("provider")
                 image_model = image_config.get("model", "default")
+                style_reference_job_id = image_config.get("__style_reference_job_id")
+                style_reference_asset_id = image_config.get("__style_reference_asset_id")
+                style_reference_path = None
+                if style_reference_job_id and style_reference_asset_id:
+                    style_reference_path = storage.get_asset_path(style_reference_job_id, style_reference_asset_id)
+                    if style_reference_path:
+                        prompt = (
+                            "Match visual style, line quality, shading, color harmony, and rendering finish to the provided style reference image. "
+                            + prompt
+                        )
+                        pubsub.emit_log(job_id, f"Using style reference: {style_reference_job_id}/{style_reference_asset_id}")
+                    else:
+                        pubsub.emit_log(job_id, "Style reference asset path not found. Continuing without style image.", level="warning")
                 
                 # SMART PROVIDER SELECTION:
                 # If provider is not explicitly chosen, or if it's 'vertex'/'google' but they aren't available,
@@ -269,12 +282,20 @@ class Runner:
                     else:
                         raise RuntimeError("Manual mask requires Google (Gemini) image service, but it is unavailable.")
 
+                if style_reference_path and chosen_provider != "google":
+                    raise RuntimeError(
+                        "Scene continuity style reference requires Google (Gemini) image provider. "
+                        "Configure Google API key and select Google provider."
+                    )
+
                 pubsub.emit_log(job_id, f"Using {chosen_provider} provider (requested: {image_provider or 'default'})")
 
                 if mask_mode == MaskMode.MANUAL:
                     prompt = "Only modify pixels inside the mask. Do not change anything outside the mask. Preserve framing, lighting, style. No new objects/text/people/animals. " + prompt
                 elif mask_mode == MaskMode.AUTO:
                     prompt = "Only modify the specified region. Do not change anything else. Preserve framing/style. " + prompt
+                elif step.type == StepType.EDIT:
+                    prompt = "Use the provided input image as the exact base. Do not regenerate a new scene. Preserve composition, camera framing, and identity of all existing elements unless explicitly requested. " + prompt
                 if mask_prompt:
                     prompt = f"{prompt}\nIntent: {mask_prompt}"
                     pubsub.emit_log(job_id, "Mask intent appended to prompt.")
@@ -312,7 +333,8 @@ class Runner:
                             str(input_path),
                             prompt,
                             output_path,
-                            config=image_config
+                            config=image_config,
+                            allow_generation_fallback=(step.type != StepType.EDIT),
                         )
                     with Image.open(output_path) as img:
                         output_img = img.copy()
@@ -344,13 +366,15 @@ class Runner:
                             edit_image_with_mask,
                             str(input_path),
                             str(mask_resolved),
-                            prompt
+                            prompt,
+                            style_reference_path
                         )
                     else:
                         output_img = await asyncio.to_thread(
                             edit_image,
                             str(input_path),
-                            prompt
+                            prompt,
+                            style_reference_path
                         )
                     history_record["model"] = MODEL_NAME
                 else:

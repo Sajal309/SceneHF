@@ -48,6 +48,7 @@ yarn-error.log*
 # Frontend build
 frontend/dist/
 frontend/build/
+frontend/.vite-cache/
 
 # OS
 .DS_Store

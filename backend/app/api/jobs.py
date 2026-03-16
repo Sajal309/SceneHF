@@ -19,6 +19,11 @@ from app.models.schemas import (
 from app.core.storage import storage
 from app.core.pubsub import pubsub
 from app.core.runner import runner
+from app.core.prompt_variants import (
+    apply_deterministic_extract_prompt_to_step,
+    build_manual_prompt_variations_for_step,
+    step_needs_llm_variation_generation,
+)
 from app.services.planner import planner
 from app.services.vertex_image import get_vertex_image_service
 from app.services.fal_bgremove import fal_service
@@ -209,7 +214,8 @@ async def list_jobs():
         jobs = []
         for jid in job_ids:
             try:
-                job = storage.load_job(jid)
+                # History list endpoint is hot and can load many jobs; skip legacy recovery scans.
+                job = storage.load_job(jid, recover_missing_outputs=False)
                 if job:
                     # Include essential metadata for history panel
                     job_data = job.model_dump(mode='json')
@@ -327,11 +333,15 @@ async def plan_job(
                     agentic_analysis=plan.agentic_analysis
                 )
 
+        # Replace EXTRACT prompts with deterministic object-only prompt and seed variations
+        for plan_step in plan.steps:
+            apply_deterministic_extract_prompt_to_step(plan_step)
+
         # Ensure prompt variations exist for each step
         pubsub.emit_log(job_id, "[planner] generating prompt variations")
         for plan_step in plan.steps:
             variations = [v.strip() for v in plan_step.prompt_variations if isinstance(v, str) and v.strip()]
-            if len(variations) < 2:
+            if step_needs_llm_variation_generation(plan_step):
                 try:
                     generated = await asyncio.to_thread(
                         planner.generate_variations,
@@ -684,6 +694,51 @@ async def edit_job(
         storage.save_job(job)
         pubsub.emit_log(job_id, "Updated API keys from frontend")
 
+    style_reference_job_id = request.style_reference_job_id
+    style_reference_asset_id = request.style_reference_asset_id
+    if bool(style_reference_job_id) != bool(style_reference_asset_id):
+        raise HTTPException(
+            status_code=400,
+            detail="style_reference_job_id and style_reference_asset_id must be provided together"
+        )
+
+    input_asset_id = request.input_asset_id or job.source_image
+    if request.input_asset_id:
+        asset = job.assets.get(request.input_asset_id)
+        if not asset:
+            raise HTTPException(status_code=404, detail="Input asset not found")
+        if asset.kind == AssetKind.MASK:
+            raise HTTPException(status_code=400, detail="Mask assets cannot be used as edit input")
+        allowed_kinds = {
+            AssetKind.SOURCE,
+            AssetKind.PLATE,
+            AssetKind.LAYER,
+            AssetKind.BG_REMOVED,
+            AssetKind.GENERATION,
+            AssetKind.DEBUG,
+        }
+        if asset.kind not in allowed_kinds:
+            raise HTTPException(status_code=400, detail=f"Asset kind '{asset.kind}' cannot be used as edit input")
+    if not input_asset_id:
+        raise HTTPException(status_code=400, detail="No valid input image available for edit")
+
+    if style_reference_job_id and style_reference_asset_id:
+        style_job = storage.load_job(style_reference_job_id, recover_missing_outputs=False)
+        if not style_job:
+            raise HTTPException(status_code=404, detail="Style reference job not found")
+        style_asset = style_job.assets.get(style_reference_asset_id)
+        if not style_asset:
+            raise HTTPException(status_code=404, detail="Style reference asset not found")
+        if style_asset.kind == AssetKind.MASK:
+            raise HTTPException(status_code=400, detail="Mask assets cannot be used as style references")
+
+    step_image_config = dict(request.image_config or {})
+    if request.scene_sequence_id:
+        step_image_config["__scene_sequence_id"] = request.scene_sequence_id
+    if style_reference_job_id and style_reference_asset_id:
+        step_image_config["__style_reference_job_id"] = style_reference_job_id
+        step_image_config["__style_reference_asset_id"] = style_reference_asset_id
+
     step_id = str(uuid.uuid4())
     step = Step(
         id=step_id,
@@ -692,8 +747,8 @@ async def edit_job(
         type=StepType.EDIT,
         prompt=request.prompt,
         status=StepStatus.QUEUED,
-        input_asset_id=job.source_image,
-        image_config=request.image_config
+        input_asset_id=input_asset_id,
+        image_config=step_image_config
     )
     job.steps.append(step)
     job.status = JobStatus.RUNNING
@@ -781,7 +836,13 @@ async def get_prompt_variations(
             request.llm_config,
             api_key
         )
-        return {"variations": variations}
+        return {
+            "variations": build_manual_prompt_variations_for_step(
+                step,
+                current_prompt,
+                variations,
+            )
+        }
     except Exception as e:
         import traceback
         traceback.print_exc()

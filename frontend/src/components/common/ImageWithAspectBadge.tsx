@@ -32,6 +32,8 @@ export function ImageWithAspectBadge({
             <img
                 {...imgProps}
                 src={src}
+                loading={imgProps.loading ?? 'lazy'}
+                decoding={imgProps.decoding ?? 'async'}
                 onLoad={(e) => {
                     const img = e.currentTarget;
                     setAspect(ratioLabel(img.naturalWidth, img.naturalHeight));

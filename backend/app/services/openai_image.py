@@ -120,7 +120,8 @@ class OpenAIImageService:
         image_path: str,
         prompt: str,
         output_path: str,
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
+        allow_generation_fallback: bool = True
     ) -> str:
         """
         Remove objects using GPT Image 1.5 image editing.
@@ -141,6 +142,8 @@ class OpenAIImageService:
             return self._edit_image(image_path, prompt, output_path, config)
         except Exception as e:
             print(f"Edit endpoint failed: {e}")
+            if not allow_generation_fallback:
+                raise RuntimeError(f"OpenAI image edit failed without fallback: {e}") from e
             # If edit fails, fall back to generation approach
             return self._generate_removal(image_path, prompt, output_path, config)
     
@@ -154,6 +157,9 @@ class OpenAIImageService:
         """Use GPT Image 1.5's v1/images/edits endpoint."""
         if not PIL_AVAILABLE:
             raise ImportError("PIL not installed")
+
+        with open(image_path, "rb") as image_file:
+            img_bytes = image_file.read()
         
         # Prepare arguments dynamically
         edit_args = {

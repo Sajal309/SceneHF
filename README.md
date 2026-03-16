@@ -92,15 +92,49 @@ A local application for AI-powered image layer extraction and plate creation wit
 
 2. **Run dev server**:
    ```bash
+   # full local dev (backend + frontend, recommended on macOS)
+   ./start-dev.sh
+
+   # from repo root (recommended)
+   ./start-frontend.sh
+
+   # or from frontend/
    npm run dev
    ```
 
-   App runs at `http://localhost:5173`
+   Frontend runs at `http://127.0.0.1:5174` (fixed dev port)
+   Backend runs at `http://127.0.0.1:8000`
+
+## Deploy Frontend to GitHub Pages
+
+GitHub Pages can host only the frontend static app. The FastAPI backend must stay deployed elsewhere.
+
+1. **Push to `main`**
+   - Workflow file: `.github/workflows/deploy-pages.yml`
+   - It builds `frontend/` and publishes `frontend/dist` to Pages.
+
+2. **Enable Pages in repo settings**
+   - GitHub: `Settings -> Pages -> Build and deployment -> Source: GitHub Actions`.
+
+3. **Set backend URL for frontend**
+   - Add a repo variable in GitHub:
+     - `Settings -> Secrets and variables -> Actions -> Variables`
+     - Name: `VITE_API_BASE`
+     - Value example: `https://your-backend-domain.com/api`
+
+4. **Allow your Pages origin in backend CORS**
+   - In backend env, set:
+     - `CORS_ALLOW_ORIGINS=https://<your-user>.github.io`
+   - If you use a custom domain, add it as well (comma-separated).
+
+Notes:
+- Frontend API base now reads `VITE_API_BASE` and falls back to `/api` for local dev.
+- The workflow builds with `--base=./` so assets resolve correctly on project pages.
 
 ## Usage
 
 ### 1. Upload Image
-- Open `http://localhost:5173`
+- Open `http://127.0.0.1:5174`
 - Drag & drop or select a background image
 
 ### 2. Generate Plan
@@ -190,19 +224,28 @@ SceneHF/
 
 ### Backend
 ```bash
+# Fastest path (repo root, fixed port 8000)
+./start-backend.sh
+
+# Or manual
 cd backend
 # Install in dev mode
 pip install -e .
 # Run with auto-reload
-uvicorn app.main:app --reload
+../.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 ### Frontend
 ```bash
+# Full stack local dev (opens backend + frontend in separate Terminal windows, reuses healthy backend)
+./start-dev.sh
+
+# Frontend only (repo root)
+./start-frontend.sh
+
+# Or manual
 cd frontend
-# Install dependencies
 npm install
-# Run dev server
 npm run dev
 # Build for production
 npm run build
@@ -218,6 +261,12 @@ npm run build
 ### Frontend build errors
 - Run `npm install` to ensure all dependencies are installed
 - Clear node_modules and reinstall: `rm -rf node_modules && npm install`
+
+### Dev launcher issues (`./start-dev.sh`)
+- If port `8000` is in use but backend health fails, another process is occupying the backend port. Stop it and retry.
+- If port `5174` is in use, stop the process using that port (fixed frontend dev port) and rerun.
+- If `.venv` is missing, create it in the repo root and install backend requirements into it.
+- If macOS blocks Terminal automation, allow Terminal/Script Editor automation permissions and run the printed fallback commands manually.
 
 ### SSE connection fails
 - Check backend is running on port 8000

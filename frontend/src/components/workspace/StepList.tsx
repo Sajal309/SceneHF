@@ -431,7 +431,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                     {variations.length > 0 && (
                                         <div className="mt-3 space-y-2 border-t border-[var(--border)] pt-3 animate-in fade-in slide-in-from-top-2 duration-300">
                                             <div className="flex items-center justify-between">
-                                                <span className="text-[10px] font-bold text-[var(--text-subtle)] uppercase tracking-wider">AI Variations</span>
+                                                <span className="text-[10px] font-bold text-[var(--text-subtle)] uppercase tracking-wider">Prompt Variations</span>
                                                 {variationsMap[step.id] && (
                                                     <button
                                                         onClick={(e) => {

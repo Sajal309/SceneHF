@@ -61,12 +61,17 @@ def _normalize_output_size(output: PILImage.Image, input_img: PILImage.Image) ->
     return output
 
 
-def edit_image(input_path: str, prompt: str) -> PILImage.Image:
+def edit_image(input_path: str, prompt: str, style_reference_path: Optional[str] = None) -> PILImage.Image:
     client = _get_client()
     input_img = PILImage.open(input_path)
+    contents = [input_img]
+    if style_reference_path:
+        style_img = PILImage.open(style_reference_path)
+        # First image is treated as style anchor; second is actual editable input.
+        contents = [style_img, input_img]
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=[input_img, prompt],
+        contents=[*contents, prompt],
     )
     output_img = _extract_image(response)
     if output_img is None:
@@ -74,13 +79,22 @@ def edit_image(input_path: str, prompt: str) -> PILImage.Image:
     return _normalize_output_size(output_img, input_img)
 
 
-def edit_image_with_mask(input_path: str, mask_path: str, prompt: str) -> PILImage.Image:
+def edit_image_with_mask(
+    input_path: str,
+    mask_path: str,
+    prompt: str,
+    style_reference_path: Optional[str] = None
+) -> PILImage.Image:
     client = _get_client()
     input_img = PILImage.open(input_path)
     mask_img = PILImage.open(mask_path)
+    contents = [input_img, mask_img]
+    if style_reference_path:
+        style_img = PILImage.open(style_reference_path)
+        contents = [style_img, input_img, mask_img]
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=[input_img, mask_img, prompt],
+        contents=[*contents, prompt],
     )
     output_img = _extract_image(response)
     if output_img is None:

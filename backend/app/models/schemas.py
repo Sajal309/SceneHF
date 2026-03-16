@@ -214,3 +214,7 @@ class UpscaleRequest(BaseModel):
 class EditRequest(BaseModel):
     image_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
     prompt: str
+    input_asset_id: Optional[str] = None
+    style_reference_job_id: Optional[str] = None
+    style_reference_asset_id: Optional[str] = None
+    scene_sequence_id: Optional[str] = None

@@ -102,8 +102,15 @@ class StorageManager:
         job.updated_at = datetime.utcnow()
         self._write_atomic(self._job_file(job.id), job.model_dump(mode="json"))
 
-    def load_job(self, job_id: str) -> Optional[Job]:
-        """Load job.json from storage root or legacy location."""
+    def load_job(self, job_id: str, recover_missing_outputs: bool = True) -> Optional[Job]:
+        """Load job.json from storage root or legacy location.
+
+        Args:
+            job_id: Job identifier.
+            recover_missing_outputs: When True, perform legacy asset/output recovery scans.
+                Disable for hot paths (startup scans, list endpoints) to avoid expensive
+                filesystem walks across every job on each load.
+        """
         job_file = self._job_file(job_id)
         if job_file.exists():
             with open(job_file, "r") as f:
@@ -111,7 +118,8 @@ class StorageManager:
             job = Job(**data)
             # If the job file is in the new storage root, enforce that root
             job.storage_root = str(self.storage_root)
-            self._recover_missing_outputs(job)
+            if recover_missing_outputs:
+                self._recover_missing_outputs(job)
             return job
 
         legacy_file = self.legacy_jobs_root / job_id / "job.json"
@@ -121,7 +129,8 @@ class StorageManager:
             job = Job(**data)
             # Legacy jobs keep their relative paths; record new storage root for future assets
             job.storage_root = str(self.storage_root)
-            self._recover_missing_outputs(job)
+            if recover_missing_outputs:
+                self._recover_missing_outputs(job)
             return job
         return None
 

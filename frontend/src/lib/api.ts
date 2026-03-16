@@ -150,14 +150,45 @@ export interface StepHistoryEntry {
 }
 
 // API Client
-const API_BASE = '/api';
+const normalizeApiBase = (value: string) =>
+    value !== '/' ? value.replace(/\/+$/, '') : value;
+const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE?.trim() || '/api');
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function getErrorDetail(res: Response, fallback: string): Promise<string> {
+    let errorMsg = fallback;
+    try {
+        const errorData = await res.json();
+        if (errorData?.detail) errorMsg = String(errorData.detail);
+    } catch {
+        // ignore non-JSON error bodies
+    }
+    return errorMsg;
+}
 
 export const api = {
     // Jobs
     async listJobs(): Promise<Job[]> {
-        const res = await fetch(`${API_BASE}/jobs`);
-        if (!res.ok) throw new Error('Failed to list jobs');
-        return res.json();
+        let lastError: Error | null = null;
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const res = await fetch(`${API_BASE}/jobs`);
+            if (res.ok) {
+                return res.json();
+            }
+
+            const message = await getErrorDetail(res, `Failed to list jobs (${res.status})`);
+            lastError = new Error(message);
+
+            // Backend may be briefly reloading during dev; retry once for transient server errors.
+            if (attempt === 0 && res.status >= 500) {
+                await sleep(300);
+                continue;
+            }
+            break;
+        }
+
+        throw lastError ?? new Error('Failed to list jobs');
     },
 
     async createJob(file: File): Promise<{ job_id: string; message: string }> {
@@ -174,18 +205,25 @@ export const api = {
     },
 
     async getJob(jobId: string): Promise<Job> {
-        const res = await fetch(`${API_BASE}/jobs/${jobId}`);
-        if (!res.ok) {
-            let errorMsg = `Failed to get job (${res.status})`;
-            try {
-                const errorData = await res.json();
-                if (errorData?.detail) errorMsg = errorData.detail;
-            } catch (e) {
-                // ignore
+        let lastError: Error | null = null;
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const res = await fetch(`${API_BASE}/jobs/${jobId}`);
+            if (res.ok) {
+                return res.json();
             }
-            throw new Error(errorMsg);
+
+            const errorMsg = await getErrorDetail(res, `Failed to get job (${res.status})`);
+            lastError = new Error(errorMsg);
+
+            if (attempt === 0 && res.status >= 500) {
+                await sleep(300);
+                continue;
+            }
+            break;
         }
-        return res.json();
+
+        throw lastError ?? new Error('Failed to get job');
     },
 
     async planJob(
@@ -265,7 +303,11 @@ export const api = {
         jobId: string,
         prompt: string,
         imageConfig: Record<string, any> = {},
-        headers: Record<string, string> = {}
+        headers: Record<string, string> = {},
+        inputAssetId?: string,
+        styleReferenceJobId?: string,
+        styleReferenceAssetId?: string,
+        sceneSequenceId?: string
     ): Promise<{ message: string; step_id: string }> {
         const res = await fetch(`${API_BASE}/jobs/${jobId}/edit`, {
             method: 'POST',
@@ -275,7 +317,11 @@ export const api = {
             },
             body: JSON.stringify({
                 prompt,
-                image_config: imageConfig
+                image_config: imageConfig,
+                input_asset_id: inputAssetId,
+                style_reference_job_id: styleReferenceJobId,
+                style_reference_asset_id: styleReferenceAssetId,
+                scene_sequence_id: sceneSequenceId
             })
         });
 

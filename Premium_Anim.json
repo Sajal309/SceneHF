@@ -1,0 +1,417 @@
+"accessories": [
+  {
+    "id": "v4nj",
+    "spriteUrl": "https://assets.autodraft.in/canvas-animations/props/2025-12-10/sprites/Prop_(31).webp",
+    "boneName": "R_Props",
+    "offset": {
+      "x": -106.67581470407822,
+      "y": -208.85902684472148,
+      "rotation": -1.9057613515906142,
+      "scaleX": -0.26845811794519375,
+      "scaleY": 0.26845811407704395
+    },
+    "name": "Silver Sword"
+  }
+]
+
+
+Walk_With_Torch
+{
+  "https://az-assets.autodraft.in/crecoAI/9c20056e-04b5-4acd-85ff-36e55909294d.png": {
+    "id": "4GVH",
+    "name": "Gemini_Generated_Image_r51a0wr51a0wr51a (2)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/9c20056e-04b5-4acd-85ff-36e55909294d.png",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": 122.66945335652144,
+          "y": -77.24937757021962,
+          "rotation": 2.4555542965990957,
+          "scaleX": 0.29522868357448495,
+          "scaleY": -0.2952286902904789
+        }
+      }
+    }
+  }
+}
+
+Sweeping_Floor
+{
+  "https://assets.autodraft.in/canvas-animations/props/2025-12-10/sprites/Prop_(61).webp": {
+    "id": "wU1S",
+    "name": "Yellow Cloth",
+    "spriteUrl": "https://assets.autodraft.in/canvas-animations/props/2025-12-10/sprites/Prop_(61).webp",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": -18.148479567143113,
+          "y": -141.9016506501639,
+          "rotation": -1.0440090315038835,
+          "scaleX": 0.10961507378806744,
+          "scaleY": 0.11565217724762
+        }
+      }
+    }
+  }
+}
+
+Boat_Drive_Stand
+{
+  "https://az-assets.autodraft.in/crecoAI/asset-6437046.png": {
+    "id": "T8mh",
+    "name": "long paddle, (boat paddle), no boat",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/asset-6437046.png",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": 226.7414928209235,
+          "y": 346.2836025110264,
+          "rotation": -0.401201553298869,
+          "scaleX": 2.8763869589604534,
+          "scaleY": -3.7648136830267873
+        }
+      }
+    }
+  }
+}
+
+Cutting_Tree
+{
+  "https://assets.autodraft.in/canvas-animations/props/props_71.png": {
+    "id": "b6DJ",
+    "name": "Props 71",
+    "spriteUrl": "https://assets.autodraft.in/canvas-animations/props/props_71.png",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": 584.9722612386645,
+          "y": -41.927163199874485,
+          "rotation": -1.9151500029831547,
+          "scaleX": -0.25702270740194105,
+          "scaleY": -0.2570227036114237
+        }
+      }
+    }
+  }
+}
+
+
+Bathing
+
+{
+  "https://az-assets.autodraft.in/crecoAI/aa7dbdaf-b051-4780-984f-d8786505133e.png": {
+    "id": "ov5N",
+    "name": "Gemini_Generated_Image_opkuupopkuupopku (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/aa7dbdaf-b051-4780-984f-d8786505133e.png",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": 43.003848664405496,
+          "y": -167.91913077137997,
+          "rotation": -2.727891010710687,
+          "scaleX": 0.332323081800808,
+          "scaleY": -0.33232307612371365
+        }
+      }
+    }
+  },
+  "https://az-assets.autodraft.in/crecoAI/27535f03-053e-4712-b33b-25cbf59ad99a.png": {
+    "id": "daCG",
+    "name": "Gemini_Generated_Image_jnirbhjnirbhjnir (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/27535f03-053e-4712-b33b-25cbf59ad99a.png",
+    "compatibleSlots": [
+      "L_Props"
+    ],
+    "offsets": {
+      "L_Props": {
+        "front-side": {
+          "x": 45.6586155755931,
+          "y": -32.97375765731431,
+          "rotation": 1.5707963267948868,
+          "scaleX": 0.21145232343317757,
+          "scaleY": -0.2114523234331753
+        }
+      }
+    }
+  }
+}
+
+Carrying_Water_Matka
+{
+  "https://az-assets.autodraft.in/crecoAI/297367ea-566d-43fb-beb3-fe4ba9da06f6.png": {
+    "id": "52a7",
+    "name": "Gemini_Generated_Image_a36c44a36c44a36c (1) (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/297367ea-566d-43fb-beb3-fe4ba9da06f6.png",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": 669.2251924475811,
+          "y": 316.24303515441534,
+          "rotation": -0.9278562772344514,
+          "scaleX": 0.7860121943878146,
+          "scaleY": -0.7860122118919978
+        }
+      }
+    }
+  }
+}
+
+Carrying_Water_Matka2
+{
+  "https://az-assets.autodraft.in/crecoAI/297367ea-566d-43fb-beb3-fe4ba9da06f6.png": {
+    "id": "n1at",
+    "name": "Gemini_Generated_Image_a36c44a36c44a36c (1) (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/297367ea-566d-43fb-beb3-fe4ba9da06f6.png",
+    "compatibleSlots": [
+      "L_Props",
+      "R_Props"
+    ],
+    "offsets": {
+      "L_Props": {
+        "front-side": {
+          "x": 11.303076698373843,
+          "y": -504.769901346659,
+          "rotation": 2.9063442529147734,
+          "scaleX": 0.7739966985185032,
+          "scaleY": -0.7739967066605888
+        }
+      },
+      "R_Props": {
+        "front-side": {
+          "x": 680.6841005421284,
+          "y": 302.40283718119736,
+          "rotation": -0.9227750951751316,
+          "scaleX": 0.7949686196677158,
+          "scaleY": -0.7949686374231174
+        }
+      }
+    }
+  }
+}
+
+Carrying_Baby
+{
+  "https://az-assets.autodraft.in/crecoAI/79aeb11c-bf9d-4e92-b1e8-1b0982a2fde5.png": {
+    "id": "c2m4",
+    "name": "Gemini_Generated_Image_ksybnpksybnpksyb (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/79aeb11c-bf9d-4e92-b1e8-1b0982a2fde5.png",
+    "compatibleSlots": [
+      "L_Props"
+    ],
+    "offsets": {
+      "L_Props": {
+        "front-side": {
+          "x": 27.38608624085191,
+          "y": -535.8190089562604,
+          "rotation": 3.016699295773059,
+          "scaleX": 0.7650369815070114,
+          "scaleY": -0.7650369858954471
+        }
+      }
+    }
+  }
+}
+
+Cleaning_Field
+
+{
+  "https://az-assets.autodraft.in/crecoAI/710daff2-e27b-4f4b-882c-094c7b8b5a08.png": {
+    "id": "TL-g",
+    "name": "Gemini_Generated_Image_41kxh741kxh741kx (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/710daff2-e27b-4f4b-882c-094c7b8b5a08.png",
+    "compatibleSlots": [
+      "L_Props"
+    ],
+    "offsets": {
+      "L_Props": {
+        "front-side": {
+          "x": -628.9046559026365,
+          "y": -403.9714130466796,
+          "rotation": 0.9923333600561924,
+          "scaleX": 1.912680436071346,
+          "scaleY": -1.9126803954347233
+        }
+      }
+    }
+  }
+}
+
+Combing_Hair
+
+{
+  "https://az-assets.autodraft.in/crecoAI/2e11b965-c1f7-4af8-bcc7-0fb96adba1d8.png": {
+    "id": "JO1g",
+    "name": "Gemini_Generated_Image_bgx6exbgx6exbgx6 (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/2e11b965-c1f7-4af8-bcc7-0fb96adba1d8.png",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": 179.02640627753635,
+          "y": 168.53428018104023,
+          "rotation": -0.40641107125695225,
+          "scaleX": -0.2976803720039539,
+          "scaleY": -0.2976803770205433
+        }
+      }
+    }
+  }
+}
+
+Reading_Book
+{
+  "https://az-assets.autodraft.in/crecoAI/asset-6439687.png": {
+    "id": "bgxg",
+    "name": "open book back view",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/asset-6439687.png",
+    "compatibleSlots": [
+      "L_Props"
+    ],
+    "offsets": {
+      "L_Props": {
+        "front-side": {
+          "x": 107.6628838927727,
+          "y": -338.0125690842433,
+          "rotation": 2.972020334000769,
+          "scaleX": 0.4502864542289215,
+          "scaleY": -0.45028645770509135
+        }
+      }
+    }
+  }
+}
+
+Resting_Under_Tree
+{
+  "https://az-assets.autodraft.in/crecoAI/d6d7558c-ca84-430c-b5f8-e2fe09169268.webp": {
+    "id": "ssWE",
+    "name": "tree",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/d6d7558c-ca84-430c-b5f8-e2fe09169268.webp",
+    "compatibleSlots": [
+      "Back_Hair"
+    ],
+    "offsets": {
+      "Back_Hair": {
+        "front-side": {
+          "x": 3763.4528187066753,
+          "y": 1275.093963025808,
+          "rotation": 1.6965478714089357,
+          "scaleX": 4.250855300586519,
+          "scaleY": 4.250855373340475
+        }
+      }
+    }
+  }
+}
+
+
+Hold_Plate_Eating
+{
+  "https://az-assets.autodraft.in/crecoAI/6f83ecf2-8865-46dd-8eb4-866999335ac9.png": {
+    "id": "KvTf",
+    "name": "Gemini_Generated_Image_71oxwr71oxwr71ox (3)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/6f83ecf2-8865-46dd-8eb4-866999335ac9.png",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": 204.31781795099562,
+          "y": 84.44813370501288,
+          "rotation": -1.0247983888564527,
+          "scaleX": 0.2062086515035003,
+          "scaleY": -0.20934498813832114
+        }
+      }
+    }
+  },
+  "https://az-assets.autodraft.in/crecoAI/7543e59b-1fb9-4723-869d-ab0bd81c82b3.png": {
+    "id": "ruRX",
+    "name": "Gemini_Generated_Image_q4r7g8q4r7g8q4r7 (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/7543e59b-1fb9-4723-869d-ab0bd81c82b3.png",
+    "compatibleSlots": [
+      "L_Props"
+    ],
+    "offsets": {
+      "L_Props": {
+        "front-side": {
+          "x": 177.6930063646987,
+          "y": -277.5618916213689,
+          "rotation": -3.1389737349667124,
+          "scaleX": 0.27041339210941034,
+          "scaleY": -0.30385675933897843
+        }
+      }
+    }
+  }
+}
+
+
+Writing
+
+{
+  "https://assets.autodraft.in/canvas-animations/props/2025-12-10/sprites/Prop_(106).webp": {
+    "id": "uv2_",
+    "name": "Silver Pen",
+    "spriteUrl": "https://assets.autodraft.in/canvas-animations/props/2025-12-10/sprites/Prop_(106).webp",
+    "compatibleSlots": [
+      "R_Props"
+    ],
+    "offsets": {
+      "R_Props": {
+        "front-side": {
+          "x": -79.6609373164174,
+          "y": -20.708987703130333,
+          "rotation": -1.5601754973328084,
+          "scaleX": 0.11439250788196362,
+          "scaleY": 0.11439250793835104
+        }
+      }
+    }
+  }
+}
+
+Tokri_On_Head_Walk
+
+{
+  "https://az-assets.autodraft.in/crecoAI/d28f26f7-5751-42fb-a6dc-3af8ef950297.png": {
+    "id": "awhY",
+    "name": "Gemini_Generated_Image_mfawpmfawpmfawpm (1)",
+    "spriteUrl": "https://az-assets.autodraft.in/crecoAI/d28f26f7-5751-42fb-a6dc-3af8ef950297.png",
+    "compatibleSlots": [
+      "Hair"
+    ],
+    "offsets": {
+      "Hair": {
+        "front-side": {
+          "x": 672.0278483187662,
+          "y": 37.98883833529362,
+          "rotation": 1.5707963267949032,
+          "scaleX": -0.5632510684464815,
+          "scaleY": 0.563251068446475
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import os
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +27,8 @@ async def lifespan(app: FastAPI):
         job_ids = storage.list_jobs()
         print(f"Startup: Found {len(job_ids)} jobs.")
         for jid in job_ids:
-            job = storage.load_job(jid)
+            # Startup only needs status checks; skip expensive recovery/import scans.
+            job = storage.load_job(jid, recover_missing_outputs=False)
             if job and job.status == JobStatus.RUNNING:
                 print(f"Pausing stuck job: {jid}")
                 job.status = JobStatus.PAUSED
@@ -44,13 +46,26 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS for local development
-# Allow localhost on any port (handles Vite using 5173 or 5174)
+# CORS configuration
+# Defaults allow local development and GitHub Pages.
+cors_allow_origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+extra_origins = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+if extra_origins:
+    cors_allow_origins.extend(
+        origin.strip() for origin in extra_origins.split(",") if origin.strip()
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    # Use a regex to allow other localhost dev ports (e.g., 5174 when 5173 is busy)
-    allow_origin_regex=r"http://localhost(:\d+)?",
+    allow_origins=cors_allow_origins,
+    # Regex keeps localhost dev ports working and allows <user>.github.io Pages origins.
+    allow_origin_regex=os.getenv(
+        "CORS_ALLOW_ORIGIN_REGEX",
+        r"http://localhost(:\d+)?|https://[a-zA-Z0-9-]+\.github\.io",
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
