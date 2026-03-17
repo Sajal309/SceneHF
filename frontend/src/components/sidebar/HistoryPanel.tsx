@@ -26,6 +26,10 @@ interface UpscaleQueueItem {
 }
 
 type EditMode = 'single' | 'continuity';
+const REFRAME_RATIOS = ['1:1', '4:5', '3:2', '16:9', '9:16', '21:9'] as const;
+function getReframePrompt(ratio: string) {
+    return `Reframe this image to a polished ${ratio} composition while preserving subject identity, scene layout, and the original visual intent. Expand the canvas naturally where needed for the new framing. The final output must match the ${ratio} aspect ratio exactly.`;
+}
 
 const CONTINUITY_STYLE_KEY = 'scenehf_continuity_style_bible';
 
@@ -49,6 +53,10 @@ const buildContinuityPrompt = (
 
 export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromReframe }: HistoryPanelProps) {
     const { settings } = useSettings();
+    const falBgRemoveEnabled = Boolean(settings.falProxyUrl);
+    const bgRemoveDisabledReason = falBgRemoveEnabled
+        ? 'Remove background from latest edit output'
+        : 'Background removal requires a configured Fal proxy URL.';
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(false);
@@ -83,10 +91,10 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
     const [bgToolsCollapsed, setBgToolsCollapsed] = useState(true);
     const [segmentationCollapsed, setSegmentationCollapsed] = useState(true);
     const [upscaleFactor, setUpscaleFactor] = useState(2);
+    const [reframeRatio, setReframeRatio] = useState<(typeof REFRAME_RATIOS)[number]>('16:9');
     const [upscaleQueue, setUpscaleQueue] = useState<UpscaleQueueItem[]>([]);
     const [planLoadingJobId, setPlanLoadingJobId] = useState<string | null>(null);
     const [locatingJobId, setLocatingJobId] = useState<string | null>(null);
-    const [bgRemovingJobId, setBgRemovingJobId] = useState<string | null>(null);
     const [bgToolUploading, setBgToolUploading] = useState(false);
     const [bgToolDragActive, setBgToolDragActive] = useState(false);
     const [trimmingAssetKey, setTrimmingAssetKey] = useState<string | null>(null);
@@ -121,7 +129,8 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         const imageConfig: Record<string, any> = {
             provider: settings.imageProvider,
             model: settings.imageModel,
-            fal_model: settings.falModel
+            fal_model: settings.falModel,
+            reframe_aspect_ratio: reframeRatio,
         };
         Object.entries(settings.imageParams).forEach(([key, param]) => {
             if (param.enabled) imageConfig[key] = param.value;
@@ -218,7 +227,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                 window.clearTimeout(timeoutId);
             }
         };
-    }, []);
+    }, [settings.storageMode, settings.storageFolderName]);
 
     useEffect(() => {
         setStyleBible(localStorage.getItem(CONTINUITY_STYLE_KEY) || '');
@@ -284,6 +293,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
     const otherJobs = jobs.filter(job => !isReframeJob(job) && !isEditJob(job) && !isUpscaleJob(job));
     const getLatestEditStep = (job: Job) => (job.steps || []).filter((step) => step.type === 'EDIT').slice(-1)[0] || null;
     const isCompletedEditStatus = (status: string) => status === 'SUCCESS' || status === 'NEEDS_REVIEW';
+    const countCompletedSteps = (job: Job) => (job.steps || []).filter((step) => isStepCompleted(step.status)).length;
     const getLatestCompletedEditAssetId = (job: Job): string | null => {
         const editSteps = (job.steps || []).filter((step) => step.type === 'EDIT');
         for (let i = editSteps.length - 1; i >= 0; i -= 1) {
@@ -734,7 +744,10 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
             const { job_id } = await api.createJob(file);
             const headers = getApiHeaders(settings);
             const imageConfig = getImageConfig();
-            await api.reframeJob(job_id, imageConfig, headers);
+            await api.reframeJob(job_id, {
+                ...imageConfig,
+                reframe_prompt: getReframePrompt(reframeRatio),
+            }, headers);
             await loadJobs();
             onLoadJob(job_id);
         } catch (err: any) {
@@ -1030,7 +1043,6 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         }
 
         setError(null);
-        setBgRemovingJobId(job.id);
         try {
             const headers = getApiHeaders(settings);
             await api.bgRemoveStep(job.id, latestEditStep.id, headers);
@@ -1039,8 +1051,6 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
         } catch (err: any) {
             console.error('Failed to remove background:', err);
             setError(err.message || 'Failed to remove background');
-        } finally {
-            setBgRemovingJobId(null);
         }
     };
 
@@ -1182,6 +1192,25 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                     {error && (
                                         <div className="text-[11px] text-[var(--danger)]">{error}</div>
                                     )}
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {REFRAME_RATIOS.map((ratio) => (
+                                            <button
+                                                key={ratio}
+                                                type="button"
+                                                onClick={() => setReframeRatio(ratio)}
+                                                className={`rounded-lg border px-2.5 py-2 text-xs font-semibold transition-all ${
+                                                    reframeRatio === ratio
+                                                        ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                                                        : 'border-[var(--border)] bg-[var(--panel-muted)] text-[var(--text-subtle)] hover:border-[var(--border-strong)]'
+                                                }`}
+                                            >
+                                                {ratio}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="text-[11px] text-[var(--text-subtle)]">
+                                        Prompt: “{getReframePrompt(reframeRatio)}”
+                                    </div>
                                     <div className="space-y-2">
                                         {reframeJobs.length === 0 && (
                                             <div className="text-xs text-[var(--text-subtle)]">No reframes yet.</div>
@@ -1189,7 +1218,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                         {reframeJobs.map((job) => {
                                             const imageUrl = getSourceImageUrl(job);
                                             const stepCount = job.steps?.length || 0;
-                                            const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
+                                            const completedSteps = countCompletedSteps(job);
                                             const outputAssetId = getLatestGeneratedAssetId(job, 'REFRAME');
                                             const downloadUrl = outputAssetId ? api.getAssetUrl(job.id, outputAssetId) : null;
 
@@ -1418,7 +1447,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                         {upscaleJobs.map((job) => {
                                             const imageUrl = getSourceImageUrl(job);
                                             const stepCount = job.steps?.length || 0;
-                                            const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
+                                            const completedSteps = countCompletedSteps(job);
                                             const outputAssetId = getLatestGeneratedAssetId(job, 'UPSCALE');
                                             const downloadUrl = outputAssetId ? api.getAssetUrl(job.id, outputAssetId) : null;
 
@@ -1745,11 +1774,9 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                         {(editMode === 'single' ? singleEditJobs : []).map((job) => {
                                             const imageUrl = getSourceImageUrl(job);
                                             const stepCount = job.steps?.length || 0;
-                                            const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
+                                            const completedSteps = countCompletedSteps(job);
                                             const outputAssetId = getLatestGeneratedAssetId(job, 'EDIT');
                                             const bgPair = getLatestBgRemovedPair(job, 'EDIT');
-                                            const latestEditStep = (job.steps || []).filter((step) => step.type === 'EDIT').slice(-1)[0];
-                                            const canRemoveBg = !!latestEditStep?.output_asset_id;
                                             const downloadUrl = outputAssetId ? api.getAssetUrl(job.id, outputAssetId) : null;
 
                                             return (
@@ -1859,12 +1886,12 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                                     </button>
                                                                     <button
                                                                         onClick={(e) => handleRemoveBgForEditJob(e, job)}
-                                                                        disabled={!canRemoveBg || bgRemovingJobId === job.id}
+                                                                        disabled={!falBgRemoveEnabled}
                                                                         className={iconActionButtonClass}
-                                                                        title={bgRemovingJobId === job.id ? 'Removing background...' : 'Remove background from latest edit output'}
-                                                                        aria-label={bgRemovingJobId === job.id ? 'Removing background' : 'Remove background'}
+                                                                        title={bgRemoveDisabledReason}
+                                                                        aria-label={falBgRemoveEnabled ? 'Remove background' : 'Remove background unavailable'}
                                                                     >
-                                                                        {bgRemovingJobId === job.id ? <ReloadIcon className="animate-spin" /> : <TransparencyGridIcon />}
+                                                                        <TransparencyGridIcon />
                                                                     </button>
                                                                     {downloadUrl && (
                                                                         <a
@@ -1969,7 +1996,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                                             {group.jobs.map((job) => {
                                                                 const imageUrl = getSourceImageUrl(job);
                                                                 const stepCount = job.steps?.length || 0;
-                                                                const completedSteps = job.steps?.filter((s) => s.status === 'SUCCESS').length || 0;
+                                                                const completedSteps = countCompletedSteps(job);
                                                                 return (
                                                                     <button
                                                                         key={job.id}
@@ -2080,7 +2107,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                             const isTrimming = trimmingAssetKey === `${job.id}:${bgPair.bgRemovedAssetId}`;
                                             const imageUrl = getSourceImageUrl(job);
                                             const stepCount = job.steps?.length || 0;
-                                            const completedSteps = job.steps?.filter((s) => s.status === 'SUCCESS').length || 0;
+                                            const completedSteps = countCompletedSteps(job);
 
                                             return (
                                                 <div
@@ -2267,7 +2294,7 @@ export function HistoryPanel({ currentJobId, onLoadJob, onGeneratePlanFromRefram
                                     {otherJobs.map((job) => {
                                         const imageUrl = getSourceImageUrl(job);
                                         const stepCount = job.steps?.length || 0;
-                                        const completedSteps = job.steps?.filter(s => s.status === 'SUCCESS').length || 0;
+                                        const completedSteps = countCompletedSteps(job);
 
                                         return (
                                             <div

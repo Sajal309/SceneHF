@@ -2,9 +2,11 @@ name: Deploy Frontend to GitHub Pages
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "codex/browser-storage-modes"]
     paths:
       - "frontend/**"
+      - "workers/**"
+      - "README.md"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 

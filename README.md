@@ -131,6 +131,53 @@ Notes:
 - Frontend API base now reads `VITE_API_BASE` and falls back to `/api` for local dev.
 - The workflow builds with `--base=./` so assets resolve correctly on project pages.
 
+## Browser-Only Branch Notes
+
+The `codex/browser-storage-modes` branch replaces the active frontend runtime with browser-owned storage and browser-side provider calls.
+
+What that branch currently supports:
+- browser session storage mode
+- local-folder storage mode via the File System Access API
+- OpenAI image generation/edit from the browser
+- Gemini image generation/edit from the browser
+- Fal background removal only through a proxy URL
+
+What it does not support:
+- direct browser-to-Fal queue calls from static hosting
+- hidden server-side processing inside GitHub Pages
+
+## Fal Proxy With BYOK (Cloudflare Worker)
+
+If you want Fal background removal on the browser-only branch, use the Worker in [workers/fal-proxy/README.md](/Users/sajal/Documents/SceneHF/workers/fal-proxy/README.md).
+
+Architecture:
+- the frontend keeps the user flow browser-first
+- the user still brings their own Fal key
+- the frontend sends that key to your Cloudflare Worker in `x-fal-api-key`
+- the Worker forwards the request to Fal and returns the processed image
+
+### Deploy the Worker
+
+1. Install and deploy:
+   ```bash
+   cd workers/fal-proxy
+   npm install
+   npm run deploy
+   ```
+
+2. Copy the deployed Worker URL.
+
+3. In the app settings, set:
+   - `Fal AI API Key`: the user's own Fal key
+   - `Fal Proxy URL`: your deployed Worker URL
+
+4. Keep `Background Removal Mode` set to the Fal model you want, for example:
+   - `fal-ai/imageutils/rembg`
+
+### Why this is needed
+
+Fal background removal cannot be completed directly from a static browser app because the browser request path runs into Fal auth/CORS constraints. The Worker is the minimal proxy layer that makes the browser UX work while still keeping the user on a BYOK flow.
+
 ## Usage
 
 ### 1. Upload Image

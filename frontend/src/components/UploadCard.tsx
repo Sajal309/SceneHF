@@ -9,6 +9,12 @@ interface LayerSpec {
     name: string;
 }
 
+const REFRAME_RATIOS = ['1:1', '4:5', '3:2', '16:9', '9:16', '21:9'] as const;
+
+function getReframePrompt(ratio: string) {
+    return `Reframe this image to a polished ${ratio} composition while preserving subject identity, scene layout, and the original visual intent. Expand the canvas naturally where needed for the new framing. The final output must match the ${ratio} aspect ratio exactly.`;
+}
+
 interface UploadCardProps {
     onJobCreated: (jobId: string | null) => void;
     initialFile?: File | null;
@@ -36,6 +42,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
     const [excludeCharactersInAuto, setExcludeCharactersInAuto] = useState(false);
     const [editPrompt, setEditPrompt] = useState('');
     const [removingCharacters, setRemovingCharacters] = useState(false);
+    const [reframeRatio, setReframeRatio] = useState<(typeof REFRAME_RATIOS)[number]>('16:9');
 
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -143,7 +150,8 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
         const imageConfig: Record<string, any> = {
             provider: settings.imageProvider,
             model: settings.imageModel,
-            fal_model: settings.falModel
+            fal_model: settings.falModel,
+            reframe_aspect_ratio: reframeRatio,
         };
         Object.entries(settings.imageParams).forEach(([key, param]) => {
             if (param.enabled) imageConfig[key] = param.value;
@@ -166,7 +174,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
             if (!step) {
                 throw new Error(`${label} step not found`);
             }
-            if (step.status === 'SUCCESS') {
+            if (step.status === 'SUCCESS' || step.status === 'NEEDS_REVIEW') {
                 return step;
             }
             if (step.status === 'FAILED' || step.status === 'CANCELLED' || step.status === 'SKIPPED') {
@@ -245,7 +253,10 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
             const { job_id } = await api.createJob(uploadedFile);
             const headers = getApiHeaders(settings);
             const imageConfig = getImageConfig();
-            await api.reframeJob(job_id, imageConfig, headers);
+            await api.reframeJob(job_id, {
+                ...imageConfig,
+                reframe_prompt: getReframePrompt(reframeRatio),
+            }, headers);
             onJobCreated(job_id);
         } catch (err: any) {
             console.error('Reframe failed:', err);
@@ -290,7 +301,10 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
 
             const reframeJob = await api.createJob(uploadedFile);
             reframeJobId = reframeJob.job_id;
-            const reframeResult = await api.reframeJob(reframeJob.job_id, imageConfig, headers);
+            const reframeResult = await api.reframeJob(reframeJob.job_id, {
+                ...imageConfig,
+                reframe_prompt: getReframePrompt(reframeRatio),
+            }, headers);
             const reframeStep = await waitForStepSuccess(reframeJob.job_id, reframeResult.step_id, 'Reframe');
             if (!reframeStep.output_asset_id) {
                 throw new Error('Reframe did not return an output image');
@@ -408,7 +422,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                             >
                                 <div className="text-sm font-semibold text-[var(--text)]">Reframe</div>
                                 <div className="text-xs text-[var(--text-subtle)] mt-1">
-                                    Reframe the image to 16:9 using a simple prompt.
+                                    Reframe the image to a selectable output ratio.
                                 </div>
                             </button>
                             <button
@@ -440,9 +454,25 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
 
                     {workflow === 'reframe' && (
                         <div className="glass-card rounded-xl p-6 space-y-3">
-                            <div className="text-sm font-semibold text-[var(--text)]">Reframe to 16:9</div>
+                            <div className="text-sm font-semibold text-[var(--text)]">Reframe</div>
+                            <div className="grid grid-cols-3 gap-2">
+                                {REFRAME_RATIOS.map((ratio) => (
+                                    <button
+                                        key={ratio}
+                                        type="button"
+                                        onClick={() => setReframeRatio(ratio)}
+                                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-all ${
+                                            reframeRatio === ratio
+                                                ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                                                : 'border-[var(--border)] bg-[var(--panel-muted)] text-[var(--text-subtle)] hover:border-[var(--border-strong)]'
+                                        }`}
+                                    >
+                                        {ratio}
+                                    </button>
+                                ))}
+                            </div>
                             <div className="text-xs text-[var(--text-subtle)]">
-                                Prompt: “Reframe this image in 16:9.”
+                                Prompt: “{getReframePrompt(reframeRatio)}”
                             </div>
                             <button
                                 onClick={handleReframe}
@@ -459,7 +489,7 @@ export function UploadCard({ onJobCreated, initialFile, onInitialFileUsed }: Upl
                     <div className="glass-card rounded-xl p-6 space-y-3">
                         <div className="text-sm font-semibold text-[var(--text)]">Preprocess</div>
                         <p className="text-xs text-[var(--text-subtle)]">
-                            Reframe to 16:9, then remove all characters from the selected image.
+                            Reframe to {reframeRatio}, then remove all characters from the selected image.
                         </p>
                         <button
                             onClick={handleRemoveCharacter}

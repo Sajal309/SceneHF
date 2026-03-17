@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSettings, ParamValue } from '../../context/SettingsContext';
-import { GearIcon, PersonIcon, MixIcon, PlusIcon, TrashIcon, CheckboxIcon, SquareIcon, ChevronDownIcon, ChevronRightIcon, ImageIcon } from '@radix-ui/react-icons';
+import { runtimeStorage } from '../../lib/api';
+import { GearIcon, PersonIcon, MixIcon, PlusIcon, TrashIcon, CheckboxIcon, SquareIcon, ChevronDownIcon, ChevronRightIcon, ImageIcon, EyeOpenIcon, EyeClosedIcon, ClipboardCopyIcon, CheckIcon } from '@radix-ui/react-icons';
 
 interface ParamListProps {
     title: string;
@@ -106,6 +107,9 @@ function CollapsibleSection({ title, icon, defaultOpen = false, children }: Coll
 
 export function SettingsPanel() {
     const { settings, updateSettings } = useSettings();
+    const [storageBusy, setStorageBusy] = useState(false);
+    const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
+    const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
     const handleParamUpdate = (type: 'llm' | 'image', key: string, value: Partial<ParamValue>) => {
         const field = type === 'llm' ? 'llmParams' : 'imageParams';
@@ -135,6 +139,40 @@ export function SettingsPanel() {
         updateSettings({ [field]: newParams });
     };
 
+    const handleReconnectFolder = async () => {
+        setStorageBusy(true);
+        try {
+            const folderName = await runtimeStorage.reconnectLocalFolder();
+            if (folderName) {
+                updateSettings({ storageMode: 'local-folder', storageFolderName: folderName });
+            }
+        } finally {
+            setStorageBusy(false);
+        }
+    };
+
+    const toggleKeyVisibility = (key: string) => {
+        setVisibleKeys((prev) => ({
+            ...prev,
+            [key]: !prev[key],
+        }));
+    };
+
+    const copyKeyValue = async (id: string, value: string) => {
+        if (!value) return;
+        try {
+            await navigator.clipboard.writeText(value);
+            setCopiedKey(id);
+            window.setTimeout(() => {
+                setCopiedKey((current) => current === id ? null : current);
+            }, 1200);
+        } catch (error) {
+            console.error('Failed to copy API key:', error);
+        }
+    };
+
+    const iconButtonClassName = 'inline-flex h-9 w-9 items-center justify-center rounded border border-[var(--border)] bg-[var(--panel)] text-[var(--text-subtle)] transition-colors hover:bg-[var(--panel-contrast)] hover:text-[var(--text)]';
+
     return (
         <div className="h-full flex flex-col p-4 glass-panel border-r border-[var(--border)] w-80 text-[var(--text)] overflow-y-auto custom-scrollbar">
             {/* Header */}
@@ -144,6 +182,28 @@ export function SettingsPanel() {
             </div>
 
             <div className="space-y-4 flex-1">
+                <CollapsibleSection title="Storage" icon={<MixIcon className="w-4 h-4 text-sky-400" />} defaultOpen>
+                    <div className="space-y-3 mt-3">
+                        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-xs text-[var(--text-muted)]">
+                            Mode: <span className="font-semibold text-[var(--text)]">{settings.storageMode || 'Not selected yet'}</span>
+                            {settings.storageFolderName ? (
+                                <div className="mt-1 text-[var(--text-subtle)]">Folder: {settings.storageFolderName}</div>
+                            ) : null}
+                        </div>
+                        <p className="text-[11px] leading-5 text-[var(--text-subtle)]">
+                            Storage mode is chosen once when the homepage opens and stays fixed for the entire session. Start a new session to choose a different mode.
+                        </p>
+                        {settings.storageMode === 'local-folder' && (
+                            <button className="btn btn-secondary w-full text-xs" onClick={handleReconnectFolder} disabled={storageBusy || !runtimeStorage.localFolderSupported}>
+                                Reconnect Folder
+                            </button>
+                        )}
+                        {!runtimeStorage.localFolderSupported && (
+                            <p className="text-[11px] text-[var(--warning)]">Local folder storage is unavailable in this browser.</p>
+                        )}
+                    </div>
+                </CollapsibleSection>
+
                 {/* LLM Configuration */}
                 <CollapsibleSection title="Text Model (LLM)" icon={<GearIcon className="w-4 h-4 text-indigo-400" />}>
                     <div className="space-y-3 mt-3">
@@ -288,6 +348,20 @@ export function SettingsPanel() {
                                 <option value="fal-ai/clarity-upscaler" />
                             </datalist>
                         </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Fal Proxy URL</label>
+                            <input
+                                type="url"
+                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none"
+                                value={settings.falProxyUrl}
+                                onChange={(e) => updateSettings({ falProxyUrl: e.target.value })}
+                                placeholder="https://your-worker.workers.dev"
+                            />
+                            <p className="text-[11px] text-[var(--text-subtle)]">
+                                Required for browser BYOK Fal requests. The frontend sends the user&apos;s Fal key to this Worker, and the Worker forwards the request to Fal.
+                            </p>
+                        </div>
                     </div>
                 </CollapsibleSection>
 
@@ -298,35 +372,104 @@ export function SettingsPanel() {
                             <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">
                                 {settings.provider === 'gemini' ? 'Google AI Key' : 'OpenAI Key'}
                             </label>
-                            <input
-                                type="password"
-                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
-                                value={settings.apiKey}
-                                onChange={(e) => updateSettings({ apiKey: e.target.value })}
-                                placeholder="sk-..."
-                            />
+                            <div className="flex gap-2">
+                                <input
+                                    type={visibleKeys.apiKey ? 'text' : 'password'}
+                                    className="flex-1 bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
+                                    value={settings.apiKey}
+                                    onChange={(e) => updateSettings({ apiKey: e.target.value })}
+                                    placeholder="sk-..."
+                                />
+                                <button
+                                    type="button"
+                                    className={iconButtonClassName}
+                                    onClick={() => toggleKeyVisibility('apiKey')}
+                                    title={visibleKeys.apiKey ? 'Hide API key' : 'Show API key'}
+                                    aria-label={visibleKeys.apiKey ? 'Hide API key' : 'Show API key'}
+                                >
+                                    {visibleKeys.apiKey ? <EyeClosedIcon /> : <EyeOpenIcon />}
+                                </button>
+                                <button
+                                    type="button"
+                                    className={iconButtonClassName}
+                                    onClick={() => copyKeyValue('apiKey', settings.apiKey)}
+                                    title="Copy API key"
+                                    aria-label="Copy API key"
+                                >
+                                    {copiedKey === 'apiKey' ? <CheckIcon /> : <ClipboardCopyIcon />}
+                                </button>
+                            </div>
+                            {copiedKey === 'apiKey' && (
+                                <p className="text-[11px] text-[var(--success)]">Key copied</p>
+                            )}
                         </div>
 
                         <div className="space-y-1">
                             <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Image API Key</label>
-                            <input
-                                type="password"
-                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
-                                value={settings.imageApiKey}
-                                onChange={(e) => updateSettings({ imageApiKey: e.target.value })}
-                                placeholder="sk-..."
-                            />
+                            <div className="flex gap-2">
+                                <input
+                                    type={visibleKeys.imageApiKey ? 'text' : 'password'}
+                                    className="flex-1 bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
+                                    value={settings.imageApiKey}
+                                    onChange={(e) => updateSettings({ imageApiKey: e.target.value })}
+                                    placeholder="sk-..."
+                                />
+                                <button
+                                    type="button"
+                                    className={iconButtonClassName}
+                                    onClick={() => toggleKeyVisibility('imageApiKey')}
+                                    title={visibleKeys.imageApiKey ? 'Hide image API key' : 'Show image API key'}
+                                    aria-label={visibleKeys.imageApiKey ? 'Hide image API key' : 'Show image API key'}
+                                >
+                                    {visibleKeys.imageApiKey ? <EyeClosedIcon /> : <EyeOpenIcon />}
+                                </button>
+                                <button
+                                    type="button"
+                                    className={iconButtonClassName}
+                                    onClick={() => copyKeyValue('imageApiKey', settings.imageApiKey)}
+                                    title="Copy image API key"
+                                    aria-label="Copy image API key"
+                                >
+                                    {copiedKey === 'imageApiKey' ? <CheckIcon /> : <ClipboardCopyIcon />}
+                                </button>
+                            </div>
+                            {copiedKey === 'imageApiKey' && (
+                                <p className="text-[11px] text-[var(--success)]">Key copied</p>
+                            )}
                         </div>
 
                         <div className="space-y-1">
                             <label className="text-[11px] font-bold text-[var(--text-subtle)] uppercase">Fal AI API Key</label>
-                            <input
-                                type="password"
-                                className="w-full bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
-                                value={settings.falApiKey}
-                                onChange={(e) => updateSettings({ falApiKey: e.target.value })}
-                                placeholder="fal_..."
-                            />
+                            <div className="flex gap-2">
+                                <input
+                                    type={visibleKeys.falApiKey ? 'text' : 'password'}
+                                    className="flex-1 bg-[var(--panel)] border border-[var(--border)] rounded px-2 py-1.5 text-sm focus:border-[var(--accent)] outline-none font-mono"
+                                    value={settings.falApiKey}
+                                    onChange={(e) => updateSettings({ falApiKey: e.target.value })}
+                                    placeholder="fal_..."
+                                />
+                                <button
+                                    type="button"
+                                    className={iconButtonClassName}
+                                    onClick={() => toggleKeyVisibility('falApiKey')}
+                                    title={visibleKeys.falApiKey ? 'Hide Fal API key' : 'Show Fal API key'}
+                                    aria-label={visibleKeys.falApiKey ? 'Hide Fal API key' : 'Show Fal API key'}
+                                >
+                                    {visibleKeys.falApiKey ? <EyeClosedIcon /> : <EyeOpenIcon />}
+                                </button>
+                                <button
+                                    type="button"
+                                    className={iconButtonClassName}
+                                    onClick={() => copyKeyValue('falApiKey', settings.falApiKey)}
+                                    title="Copy Fal API key"
+                                    aria-label="Copy Fal API key"
+                                >
+                                    {copiedKey === 'falApiKey' ? <CheckIcon /> : <ClipboardCopyIcon />}
+                                </button>
+                            </div>
+                            {copiedKey === 'falApiKey' && (
+                                <p className="text-[11px] text-[var(--success)]">Key copied</p>
+                            )}
                         </div>
                     </div>
                 </CollapsibleSection>

@@ -16,11 +16,14 @@ interface StepListProps {
 
 export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopStep, onOpenMask, onBgRemove }: StepListProps) {
     const { settings } = useSettings();
+    const falBgRemoveEnabled = Boolean(settings.falProxyUrl);
+    const bgRemoveDisabledReason = falBgRemoveEnabled
+        ? 'Remove background'
+        : 'Background removal requires a configured Fal proxy URL.';
     const [generatingVariations, setGeneratingVariations] = useState<string | null>(null); // stepId
     const [variationsMap, setVariationsMap] = useState<Record<string, string[]>>({}); // stepId -> variations
     const [dragOverStepId, setDragOverStepId] = useState<string | null>(null);
     const [uploadingStepId, setUploadingStepId] = useState<string | null>(null);
-    const [bgRemovingStepId, setBgRemovingStepId] = useState<string | null>(null);
     const iconBtnBase = 'inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
     const iconBtnPrimary = `${iconBtnBase} border-blue-200 bg-[var(--accent-soft)] text-[var(--accent-strong)] hover:bg-blue-100`;
     const iconBtnNeutral = `${iconBtnBase} border-[var(--border)] bg-[var(--panel-contrast)] text-[var(--text-subtle)] hover:bg-[var(--border)] hover:text-[var(--text)]`;
@@ -163,12 +166,7 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
     };
 
     const handleBgRemove = async (stepId: string) => {
-        setBgRemovingStepId(stepId);
-        try {
-            await onBgRemove(stepId);
-        } finally {
-            setBgRemovingStepId(null);
-        }
+        await onBgRemove(stepId);
     };
 
     return (
@@ -409,18 +407,14 @@ export function StepList({ job, selectedStep, onSelectStep, onRerunStep, onStopS
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            handleBgRemove(step.id);
+                                                            void handleBgRemove(step.id);
                                                         }}
-                                                        disabled={bgRemovingStepId === step.id}
+                                                        disabled={!falBgRemoveEnabled}
                                                         className={iconBtnNeutral}
-                                                        title={bgRemovingStepId === step.id ? 'Removing background...' : 'Remove background'}
-                                                        aria-label={bgRemovingStepId === step.id ? 'Removing background' : 'Remove background'}
+                                                        title={bgRemoveDisabledReason}
+                                                        aria-label={falBgRemoveEnabled ? 'Remove background' : 'Remove background unavailable'}
                                                     >
-                                                        {bgRemovingStepId === step.id ? (
-                                                            <UpdateIcon className="w-3.5 h-3.5 animate-spin" />
-                                                        ) : (
-                                                            <TransparencyGridIcon className="w-3.5 h-3.5" />
-                                                        )}
+                                                        <TransparencyGridIcon className="w-3.5 h-3.5" />
                                                     </button>
                                                 )}
                                             </>

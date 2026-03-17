@@ -34,9 +34,10 @@ interface WorkspaceProps {
     onJobCreated: (jobId: string | null) => void;
     prefillImage?: File | null;
     onPrefillImageUsed?: () => void;
+    storageSessionKey: string;
 }
 
-export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUsed }: WorkspaceProps) {
+export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUsed, storageSessionKey }: WorkspaceProps) {
     const { settings } = useSettings();
     const [job, setJob] = useState<Job | null>(null);
     const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -56,9 +57,9 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
     // Persist job ID to localStorage
     useEffect(() => {
         if (jobId) {
-            localStorage.setItem('scenehf_last_job', jobId);
+            localStorage.setItem(storageSessionKey, jobId);
         }
-    }, [jobId]);
+    }, [jobId, storageSessionKey]);
 
     // SSE for live updates
     const handleJobUpdate = useCallback((updatedJob: Job) => {
@@ -146,7 +147,7 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
                 console.error('Failed to load job:', error);
                 const msg = error instanceof Error ? error.message : String(error);
                 if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
-                    localStorage.removeItem('scenehf_last_job');
+                    localStorage.removeItem(storageSessionKey);
                     setJob(null);
                     setSelectedStepId(null);
                     onJobCreated(null);
@@ -155,7 +156,7 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
         };
 
         loadJob();
-    }, [jobId]);
+    }, [jobId, storageSessionKey]);
 
     const handlePlan = async () => {
         if (!job) return;
@@ -206,6 +207,7 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
             await api.retryStep(job.id, stepId, prompt, imageConfig, headers);
         } catch (error) {
             console.error('Rerun failed:', error);
+            alert(`Step failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     };
 
@@ -238,6 +240,7 @@ export function Workspace({ jobId, onJobCreated, prefillImage, onPrefillImageUse
             }
         } catch (error) {
             console.error('BG remove failed:', error);
+            alert(`Background removal failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     };
 

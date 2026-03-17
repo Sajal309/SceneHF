@@ -1,5 +1,4 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
-import { SettingsProvider } from '../context/SettingsContext';
 
 const SettingsPanel = lazy(async () => {
     const mod = await import('../components/sidebar/SettingsPanel');
@@ -15,20 +14,18 @@ interface MainLayoutProps {
     children: React.ReactNode;
     onLoadJob: (jobId: string | null) => void;
     onPlanWithImage: (file: File) => void;
+    storageSessionKey: string;
 }
 
-export function MainLayout({ children, onLoadJob, onPlanWithImage }: MainLayoutProps) {
+export function MainLayout({ children, onLoadJob, onPlanWithImage, storageSessionKey }: MainLayoutProps) {
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
     const [showSettingsPanel, setShowSettingsPanel] = useState(false);
     const [showHistoryPanel, setShowHistoryPanel] = useState(false);
 
-    // Restore last job on mount
     useEffect(() => {
-        const lastJobId = localStorage.getItem('scenehf_last_job');
-        if (lastJobId) {
-            handleLoadJob(lastJobId);
-        }
-    }, []);
+        const lastJobId = localStorage.getItem(storageSessionKey);
+        handleLoadJob(lastJobId || null);
+    }, [storageSessionKey]);
 
     useEffect(() => {
         const rafId = window.requestAnimationFrame(() => {
@@ -56,35 +53,30 @@ export function MainLayout({ children, onLoadJob, onPlanWithImage }: MainLayoutP
     };
 
     return (
-        <SettingsProvider>
-            <div className="flex h-screen w-screen bg-[var(--bg)] text-[var(--text)] overflow-hidden font-sans selection:bg-[var(--accent-soft)]">
-                {/* Left Sidebar - Settings */}
-                {showSettingsPanel ? (
-                    <Suspense fallback={<aside className="w-80 h-full border-r border-[var(--border)] bg-[var(--panel-muted)]/60" />}>
-                        <SettingsPanel />
-                    </Suspense>
-                ) : (
-                    <aside className="w-80 h-full border-r border-[var(--border)] bg-[var(--panel-muted)]/60" />
-                )}
+        <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg)] font-sans text-[var(--text)] selection:bg-[var(--accent-soft)]">
+            {showSettingsPanel ? (
+                <Suspense fallback={<aside className="h-full w-80 border-r border-[var(--border)] bg-[var(--panel-muted)]/60" />}>
+                    <SettingsPanel />
+                </Suspense>
+            ) : (
+                <aside className="h-full w-80 border-r border-[var(--border)] bg-[var(--panel-muted)]/60" />
+            )}
 
-                {/* Center - Workspace */}
-                <main className="flex-1 h-full min-w-0 flex flex-col bg-[var(--bg)] relative">
-                    {children}
-                </main>
+            <main className="relative flex h-full min-w-0 flex-1 flex-col bg-[var(--bg)]">
+                {children}
+            </main>
 
-                {/* Right Sidebar - History */}
-                {showHistoryPanel ? (
-                    <Suspense fallback={<aside className="w-[420px] h-full border-l border-[var(--border)] bg-[var(--panel-muted)]/60" />}>
-                        <HistoryPanel
-                            currentJobId={currentJobId}
-                            onLoadJob={handleLoadJob}
-                            onGeneratePlanFromReframe={handlePlanWithImage}
-                        />
-                    </Suspense>
-                ) : (
-                    <aside className="w-[420px] h-full border-l border-[var(--border)] bg-[var(--panel-muted)]/60" />
-                )}
-            </div>
-        </SettingsProvider>
+            {showHistoryPanel ? (
+                <Suspense fallback={<aside className="h-full w-[420px] border-l border-[var(--border)] bg-[var(--panel-muted)]/60" />}>
+                    <HistoryPanel
+                        currentJobId={currentJobId}
+                        onLoadJob={handleLoadJob}
+                        onGeneratePlanFromReframe={handlePlanWithImage}
+                    />
+                </Suspense>
+            ) : (
+                <aside className="h-full w-[420px] border-l border-[var(--border)] bg-[var(--panel-muted)]/60" />
+            )}
+        </div>
     );
 }

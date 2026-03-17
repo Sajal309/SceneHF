@@ -38,8 +38,11 @@ export function PreviewPane({ job, step }: PreviewPaneProps) {
         }
 
         if (url) {
-            // Force refresh by adding extra key
-            return `${url}&rk=${refreshKey}`;
+            if (url.startsWith('blob:') || url.startsWith('data:')) {
+                return url;
+            }
+            const separator = url.includes('?') ? '&' : '?';
+            return `${url}${separator}rk=${refreshKey}`;
         }
         return null;
     };
