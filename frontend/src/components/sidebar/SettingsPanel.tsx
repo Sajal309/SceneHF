@@ -204,12 +204,14 @@ export function SettingsPanel() {
     const iconButtonClassName = 'inline-flex h-9 w-9 items-center justify-center rounded border border-[var(--border)] bg-[var(--panel)] text-[var(--text-subtle)] transition-colors hover:bg-[var(--panel-contrast)] hover:text-[var(--text)]';
     const llmModelOptions = settings.provider === 'gemini'
         ? ['gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-1.5-pro']
-        : ['gpt-4o', 'gpt-4o-mini', 'o1'];
+        : ['gpt-5', 'gpt-5.3', 'gpt-5-mini', 'gpt-5-nano', 'gpt-4o', 'gpt-4o-mini', 'o1'];
     const imageModelOptions = settings.imageProvider === 'google'
         ? ['gemini-2.5-flash-image']
         : settings.imageProvider === 'openai'
             ? ['gpt-image-1.5', 'gpt-image-1-mini', 'chatgpt-image-latest', 'dall-e-3']
             : ['imagegeneration@006'];
+    const falBgModelOptions = ['fal-ai/imageutils/rembg', 'fal-ai/bria/background/remove'];
+    const falUpscaleModelOptions = ['fal-ai/imageutils/upscale', 'fal-ai/clarity-upscaler', 'fal-ai/esrgan'];
 
     return (
         <div className="h-full flex flex-col p-4 glass-panel border-r border-[var(--border)] w-80 text-[var(--text)] overflow-y-auto custom-scrollbar">
@@ -268,6 +270,10 @@ export function SettingsPanel() {
                                 placeholder="e.g. gpt-4o"
                             />
                             <datalist id="model-options">
+                                <option value="gpt-5" />
+                                <option value="gpt-5.3" />
+                                <option value="gpt-5-mini" />
+                                <option value="gpt-5-nano" />
                                 <option value="gemini-2.0-flash-exp" />
                                 <option value="gemini-1.5-flash" />
                                 <option value="gemini-1.5-pro" />
@@ -385,7 +391,13 @@ export function SettingsPanel() {
                             />
                             <datalist id="fal-bg-mode-options">
                                 <option value="fal-ai/imageutils/rembg" />
+                                <option value="fal-ai/bria/background/remove" />
                             </datalist>
+                            <PresetChips
+                                options={falBgModelOptions}
+                                value={settings.falModel}
+                                onSelect={(value) => updateSettings({ falModel: value })}
+                            />
                         </div>
 
                         <div className="space-y-1">
@@ -403,6 +415,11 @@ export function SettingsPanel() {
                                 <option value="fal-ai/esrgan" />
                                 <option value="fal-ai/clarity-upscaler" />
                             </datalist>
+                            <PresetChips
+                                options={falUpscaleModelOptions}
+                                value={settings.upscaleModel}
+                                onSelect={(value) => updateSettings({ upscaleModel: value })}
+                            />
                         </div>
 
                         <div className="space-y-1">
