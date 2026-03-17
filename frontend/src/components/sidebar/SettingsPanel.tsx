@@ -105,6 +105,36 @@ function CollapsibleSection({ title, icon, defaultOpen = false, children }: Coll
     );
 }
 
+interface PresetChipsProps {
+    options: string[];
+    value: string;
+    onSelect: (value: string) => void;
+}
+
+function PresetChips({ options, value, onSelect }: PresetChipsProps) {
+    return (
+        <div className="flex flex-wrap gap-2">
+            {options.map((option) => {
+                const selected = value === option;
+                return (
+                    <button
+                        key={option}
+                        type="button"
+                        onClick={() => onSelect(option)}
+                        className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-all ${
+                            selected
+                                ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                                : 'border-[var(--border)] bg-[var(--panel)] text-[var(--text-subtle)] hover:border-[var(--border-strong)] hover:text-[var(--text)]'
+                        }`}
+                    >
+                        {option}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
 export function SettingsPanel() {
     const { settings, updateSettings } = useSettings();
     const [storageBusy, setStorageBusy] = useState(false);
@@ -172,6 +202,14 @@ export function SettingsPanel() {
     };
 
     const iconButtonClassName = 'inline-flex h-9 w-9 items-center justify-center rounded border border-[var(--border)] bg-[var(--panel)] text-[var(--text-subtle)] transition-colors hover:bg-[var(--panel-contrast)] hover:text-[var(--text)]';
+    const llmModelOptions = settings.provider === 'gemini'
+        ? ['gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-1.5-pro']
+        : ['gpt-4o', 'gpt-4o-mini', 'o1'];
+    const imageModelOptions = settings.imageProvider === 'google'
+        ? ['gemini-2.5-flash-image']
+        : settings.imageProvider === 'openai'
+            ? ['gpt-image-1.5', 'gpt-image-1-mini', 'chatgpt-image-latest', 'dall-e-3']
+            : ['imagegeneration@006'];
 
     return (
         <div className="h-full flex flex-col p-4 glass-panel border-r border-[var(--border)] w-80 text-[var(--text)] overflow-y-auto custom-scrollbar">
@@ -237,6 +275,11 @@ export function SettingsPanel() {
                                 <option value="gpt-4o-mini" />
                                 <option value="o1" />
                             </datalist>
+                            <PresetChips
+                                options={llmModelOptions}
+                                value={settings.model}
+                                onSelect={(value) => updateSettings({ model: value })}
+                            />
                         </div>
 
                         <ParamList
@@ -288,10 +331,23 @@ export function SettingsPanel() {
                             />
                             <datalist id="image-model-options">
                                 <option value="gpt-image-1.5" />
+                                <option value="gpt-image-1-mini" />
                                 <option value="gemini-2.5-flash-image" />
                                 <option value="dall-e-3" />
                                 <option value="chatgpt-image-latest" />
+                                <option value="imagegeneration@006" />
                             </datalist>
+                            <PresetChips
+                                options={imageModelOptions}
+                                value={settings.imageModel}
+                                onSelect={(value) => {
+                                    const updates: any = { imageModel: value };
+                                    if (value.toLowerCase().includes('gemini')) updates.imageProvider = 'google';
+                                    else if (value.toLowerCase().includes('gpt-image') || value.toLowerCase().includes('dall-e') || value.toLowerCase().includes('chatgpt-image')) updates.imageProvider = 'openai';
+                                    else if (value.toLowerCase().includes('imagegeneration@')) updates.imageProvider = 'vertex';
+                                    updateSettings(updates);
+                                }}
+                            />
                         </div>
 
                         <ParamList
